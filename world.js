@@ -1,114 +1,103 @@
 /* ============================================================================
-   Bug Wars — world.js
+   Bug Wars — world.js   (v2)
    ----------------------------------------------------------------------------
-   The DATA layer. This file holds:
-     - the factory functions that build entities (units, buildings, food)
-     - initWorld(), which lays out the starting map
-     - small helpers (byId, removeDead)
-
-   An "entity" is just a plain object with a `kind` field. There is no class
-   hierarchy — a worker and a soldier are the same shape of object with
-   different numbers, and the behavior lives in systems.js. This keeps every
-   piece of a unit's state visible in one place.
+   The DATA layer: entity factories, the map layout, and small helpers.
+   Entities are plain objects with a `kind` field — no class hierarchy.
+   v2: three resources (per-side stores), typed nodes, table-driven buildings.
    ========================================================================== */
 
 window.BW = window.BW || {};
 
 (function () {
   const cfg = BW.config;
-
-  // Every entity gets a unique id. We select/target by id (never by object
-  // reference) so that deleting a dead unit can't leave a dangling pointer.
   let _nextId = 1;
   const nextId = () => _nextId++;
 
   function createUnit(kind, team, x, y) {
     const s = cfg.UNIT_STATS[kind];
     return {
-      id: nextId(), kind, team,
-      x, y, vx: 0, vy: 0,
+      id: nextId(), kind, team, x, y, vx: 0, vy: 0,
       hp: s.hp, maxHp: s.hp,
       heading: team === 'player' ? -Math.PI / 2 : Math.PI / 2,
-      // order = what this unit is currently trying to do
       order: { type: 'idle', tx: x, ty: y, targetId: null },
       attackCooldown: 0,
-      carrying: 0,            // food a worker is holding
-      venomDps: 0,            // active poison (set by fire ants)
-      venomTimer: 0,
+      carrying: 0, carryType: null,   // how much / which resource a worker holds
+      venomDps: 0, venomTimer: 0,
     };
   }
 
   function createBuilding(kind, team, x, y) {
-    const s = cfg.nest;
-    // Rally point sits in front of the nest (toward the map) so trained units
-    // don't spawn on top of the building.
+    const s = cfg.BUILDING_STATS[kind];
     const forward = team === 'player' ? -1 : 1;
-    return {
-      id: nextId(), kind, team,
-      x, y,
+    const b = {
+      id: nextId(), kind, team, x, y,
       hp: s.hp, maxHp: s.hp,
-      trainQueue: [],         // list of kinds waiting to be built
-      trainTimer: 0,          // seconds left on the unit currently building
-      rallyX: x, rallyY: y + forward * cfg.rallyOffset,
+      attackCooldown: 0,              // used by towers
     };
+    if (s.trains) {                   // production building
+      b.trainQueue = [];
+      b.trainTimer = 0;
+      b.rallyX = x;
+      b.rallyY = y + forward * cfg.rallyOffset;
+    }
+    return b;
   }
 
-  function createFood(x, y) {
-    return { id: nextId(), kind: 'food', x, y, amount: cfg.food.amount };
+  function createNode(resource, x, y) {
+    return { id: nextId(), kind: 'node', resource, x, y, amount: cfg.resources[resource].amount };
   }
 
-  function initWorld() {
+  function initWorld(difficulty) {
     const W = cfg.world.width, H = cfg.world.height;
 
     const state = {
-      units: [],
-      buildings: [],
-      food: [],
-      obstacles: [],
-      selected: new Set(),    // ids of selected PLAYER units
-      playerFood: cfg.startingFood,
-      phase: 'playing',       // 'playing' | 'won' | 'lost'
+      units: [], buildings: [], nodes: [], obstacles: [],
+      selected: new Set(),
+      res: {                          // per-side resource stores
+        player: { ...cfg.startingResources },
+        enemy:  { ...cfg.startingResources },
+      },
+      phase: 'playing',               // 'menu' | 'playing' | 'won' | 'lost'
       paused: false,
-      drag: null,             // {x0,y0,x1,y1} while drag-selecting
-      time: 0,                // seconds elapsed
-      ai: { state: 'defending', waveTimer: cfg.ai.firstWaveDelay, waveNumber: 0 },
+      difficulty: difficulty || 'normal',
+      drag: null,                     // box-select rectangle
+      placing: null,                  // { kind } while in build-placement mode
+      placeXY: null,                  // ghost position
+      pings: [], alerts: [],
+      time: 0,
+      ai: { think: 0, attacked: false },
     };
 
-    // Bases in opposite corners: you bottom-left, enemy top-right.
     const playerNest = createBuilding('nest', 'player', 170, H - 150);
     const enemyNest  = createBuilding('nest', 'enemy',  W - 170, 150);
     state.buildings.push(playerNest, enemyNest);
 
-    // Your starting workers, ringed around the nest.
-    for (let i = 0; i < cfg.startingWorkers; i++) {
-      const a = (i / cfg.startingWorkers) * Math.PI * 2;
-      state.units.push(
-        createUnit('worker', 'player',
-          playerNest.x + Math.cos(a) * 48,
-          playerNest.y + Math.sin(a) * 48)
-      );
-    }
+    // Starting workers for BOTH sides (the AI runs a real economy too).
+    const ring = (nest, team) => {
+      for (let i = 0; i < cfg.startingWorkers; i++) {
+        const a = (i / cfg.startingWorkers) * Math.PI * 2;
+        state.units.push(createUnit('worker', team, nest.x + Math.cos(a) * 48, nest.y + Math.sin(a) * 48));
+      }
+    };
+    ring(playerNest, 'player');
+    ring(enemyNest, 'enemy');
 
-    // A small enemy garrison so their base isn't defenceless.
-    for (let i = 0; i < 2; i++) {
-      state.units.push(
-        createUnit('soldier', 'enemy', enemyNest.x - 15 + i * 30, enemyNest.y + 55)
-      );
-    }
-
-    // Food: a cluster by each base + contested piles in the middle.
-    const spots = [
-      [330, H - 175], [305, H - 255], [235, H - 300],     // yours
-      [W - 330, 175], [W - 305, 255], [W - 235, 300],     // theirs
-      [W / 2, H / 2], [W / 2 - 130, H / 2 + 90], [W / 2 + 130, H / 2 - 90], // middle
+    // Resource layout: FOOD near each base, MUD in the mid-lanes,
+    // HONEYDEW scarce and contested in the center.
+    const nodes = [
+      ['food', 320, H - 170], ['food', 300, H - 250], ['food', 235, H - 300],
+      ['food', W - 320, 170], ['food', W - 300, 250], ['food', W - 235, 300],
+      ['mud', 430, H - 300], ['mud', W - 430, 300],
+      ['mud', W / 2 - 230, H / 2 + 120], ['mud', W / 2 + 230, H / 2 - 120],
+      ['honeydew', W / 2, H / 2], ['honeydew', W / 2 - 90, H / 2 + 70], ['honeydew', W / 2 + 90, H / 2 - 70],
     ];
-    spots.forEach(([x, y]) => state.food.push(createFood(x, y)));
+    nodes.forEach(([r, x, y]) => state.nodes.push(createNode(r, x, y)));
 
-    // A few rocks to give the open field a little shape.
+    // A few rocks for shape (walls get added to avoidance dynamically).
     state.obstacles = [
-      { x: W / 2,       y: H / 2 - 190, r: 46 },
-      { x: W / 2 - 270, y: H / 2 - 30,  r: 36 },
-      { x: W / 2 + 270, y: H / 2 + 30,  r: 36 },
+      { x: W / 2,       y: H / 2 - 210, r: 44 },
+      { x: W / 2 - 300, y: H / 2 + 30,  r: 34 },
+      { x: W / 2 + 300, y: H / 2 - 30,  r: 34 },
     ];
 
     BW.state = state;
@@ -121,15 +110,12 @@ window.BW = window.BW || {};
     const s = BW.state;
     return s.units.find(u => u.id === id)
         || s.buildings.find(b => b.id === id)
-        || s.food.find(f => f.id === id)
+        || s.nodes.find(n => n.id === id)
         || null;
   }
 
-  // Sweep out anything that died this frame, and decide win/lose when a nest
-  // falls. Called once per update from systems.js.
   function removeDead() {
     const s = BW.state;
-
     s.units = s.units.filter(u => u.hp > 0);
 
     for (const b of s.buildings) {
@@ -139,15 +125,14 @@ window.BW = window.BW || {};
       }
     }
     s.buildings = s.buildings.filter(b => b.hp > 0);
-    s.food = s.food.filter(f => f.amount > 0);
+    s.nodes = s.nodes.filter(n => n.amount > 0);
 
-    // Drop dead units out of the selection set.
     for (const id of [...s.selected]) {
       if (!s.units.some(u => u.id === id)) s.selected.delete(id);
     }
   }
 
-  BW.world = { createUnit, createBuilding, createFood, initWorld, nextId };
+  BW.world = { createUnit, createBuilding, createNode, initWorld, nextId };
   BW.byId = byId;
   BW.removeDead = removeDead;
 })();

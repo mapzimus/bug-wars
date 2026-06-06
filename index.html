@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bug Wars — Maxwell Howe GIS</title>
-  <meta name="description" content="Bug Wars: a browser real-time strategy game. Command an ant colony in a backyard war — gather, build, and destroy the rival nest.">
+  <meta name="description" content="Bug Wars: a browser real-time strategy game. Command an ant colony — gather three resources, build, defend, and destroy the rival nest.">
   <link rel="icon" type="image/svg+xml" href="../images/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,17 +17,15 @@
   <header class="topbar">
     <div class="leftgroup">
       <a href="../portfolio.html" class="back-link" title="Back to portfolio">↩ <span class="bl-text">portfolio</span></a>
-      <div class="brand">
-        <span class="logo">🐜</span>
-        <span class="title">BUG WARS</span>
-        <span class="tag">Ants · vertical slice</span>
-      </div>
+      <div class="brand"><span class="logo">🐜</span><span class="title">BUG WARS</span></div>
     </div>
     <div class="stats">
-      <div class="stat"><span class="label">Food</span><span id="foodCount" class="val">0</span></div>
+      <div class="stat res-food"><span class="dot"></span><span id="foodCount" class="val">0</span><span class="rlabel">Food</span></div>
+      <div class="stat res-mud"><span class="dot"></span><span id="mudCount" class="val">0</span><span class="rlabel">Mud</span></div>
+      <div class="stat res-honey"><span class="dot"></span><span id="honeydewCount" class="val">0</span><span class="rlabel">Honeydew</span></div>
       <div class="stat"><span class="label">Pop</span><span id="popCount" class="val">0/0</span></div>
-      <div class="stat"><span class="label">Wave</span><span id="waveCount" class="val">0</span></div>
-      <div class="stat"><span class="label">Selected</span><span id="selCount" class="val">0</span></div>
+      <div class="stat"><span class="label">Time</span><span id="clock" class="val">0:00</span></div>
+      <div class="stat"><span class="label">Sel</span><span id="selCount" class="val">0</span></div>
       <button id="pauseBtn" class="ctrl" title="Pause / resume (P)">⏸ Pause</button>
     </div>
   </header>
@@ -35,42 +33,65 @@
   <!-- ===== Play area ===== -->
   <main class="stage">
     <canvas id="gameCanvas" width="1280" height="720"></canvas>
-    <div id="pauseBadge" class="pause-badge">PAUSED</div>
+    <div id="warnBanner" class="warn-banner">⚠ The red colony is attacking!</div>
     <div id="toast" class="toast"></div>
+
+    <!-- Tutorial coaching card -->
+    <div id="tutorial" class="tutorial">
+      <button id="tutorialClose" class="tut-x" title="Hide">×</button>
+      <div class="tut-h">How to play</div>
+      <div id="tutorialText" class="tut-t"></div>
+    </div>
+
+    <!-- Start / How-to-Play menu -->
+    <div id="menu" class="overlay menu">
+      <div class="overlay-card menu-card">
+        <h1 class="menu-title">BUG WARS</h1>
+        <p class="menu-sub">A backyard real-time strategy game. Out-economy, out-build, and out-fight a rival ant colony.</p>
+        <div class="how">
+          <div><b>Gather</b> — drag-select workers, right-click <span class="c-food">Food</span> / <span class="c-mud">Mud</span> / <span class="c-honey">Honeydew</span> to mine. They keep at it until you move them.</div>
+          <div><b>Build &amp; Train</b> — spend Mud on a Barracks/Workshop/Tower/Walls; spend Food to train ants. Counters matter: infantry &gt; skirmisher &gt; siege &gt; buildings.</div>
+          <div><b>Win</b> — destroy the enemy nest before they destroy yours. You'll get a warning when they march.</div>
+        </div>
+        <div class="diffrow">
+          <button class="ctrl big diffbtn" data-diff="easy">Easy</button>
+          <button class="ctrl big diffbtn" data-diff="normal">Normal</button>
+          <button class="ctrl big diffbtn" data-diff="hard">Hard</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Win / lose overlay -->
     <div id="overlay" class="overlay">
       <div class="overlay-card">
         <h1 id="overlayTitle">Victory</h1>
         <p id="overlayMsg"></p>
-        <button class="ctrl big" data-action="restart">↻ Play again</button>
+        <div class="diffrow">
+          <button class="ctrl big" data-action="restart">↻ Play again</button>
+          <button class="ctrl" data-action="menu">Change difficulty</button>
+        </div>
       </div>
     </div>
   </main>
 
-  <!-- ===== Build panel ===== -->
+  <!-- ===== Build + Train panel ===== -->
   <footer class="panel">
-    <div class="hint">
-      <b>Left-click</b> select · <b>drag</b> box-select · <b>right-click</b> move / attack ·
-      your <b>workers gather on their own</b> &amp; idle fighters defend — build an army and smash the red nest.
-    </div>
-    <div class="buildbar">
-      <button class="trainbtn" data-kind="worker">
-        <span class="bk">Worker</span><span class="bc">🍞 50</span><span class="bh">1</span>
-        <span class="bd">gathers food</span>
-      </button>
-      <button class="trainbtn" data-kind="soldier">
-        <span class="bk">Soldier</span><span class="bc">🍞 80</span><span class="bh">2</span>
-        <span class="bd">tanky frontline</span>
-      </button>
-      <button class="trainbtn" data-kind="fireant">
-        <span class="bk">Fire Ant</span><span class="bc">🍞 70</span><span class="bh">3</span>
-        <span class="bd">fast · venom</span>
-      </button>
-      <button class="trainbtn" data-kind="leafcutter">
-        <span class="bk">Leafcutter</span><span class="bc">🍞 90</span><span class="bh">4</span>
-        <span class="bd">siege buildings</span>
-      </button>
+    <div class="rows">
+      <div class="panel-row">
+        <span class="row-label">Build <small>(Mud)</small></span>
+        <button class="buildbtn" data-build="barracks"><span class="bk">Barracks</span><span class="bc">🟫 120</span><span class="bd">makes soldiers / fire ants</span></button>
+        <button class="buildbtn" data-build="workshop"><span class="bk">Workshop</span><span class="bc">🟫 160</span><span class="bd">makes leafcutters (siege)</span></button>
+        <button class="buildbtn" data-build="granary"><span class="bk">Granary</span><span class="bc">🟫 70</span><span class="bd">closer drop-off</span></button>
+        <button class="buildbtn" data-build="tower"><span class="bk">Tower</span><span class="bc">🟫 140</span><span class="bd">shoots attackers</span></button>
+        <button class="buildbtn" data-build="wall"><span class="bk">Wall</span><span class="bc">🟫 25</span><span class="bd">blocks a path</span></button>
+      </div>
+      <div class="panel-row">
+        <span class="row-label">Train</span>
+        <button class="trainbtn" data-train="worker"><span class="bk">Worker</span><span class="bc">🍞 50</span><span class="bh">1</span><span class="bd">gathers resources</span></button>
+        <button class="trainbtn" data-train="soldier"><span class="bk">Soldier</span><span class="bc">🍞 70 🟫 10</span><span class="bh">2</span><span class="bd">tanky · beats skirmishers</span></button>
+        <button class="trainbtn" data-train="fireant"><span class="bk">Fire Ant</span><span class="bc">🍞 60 🟫 5</span><span class="bh">3</span><span class="bd">fast · venom · beats siege</span></button>
+        <button class="trainbtn" data-train="leafcutter"><span class="bk">Leafcutter</span><span class="bc">🍞 70 🟫 30</span><span class="bh">4</span><span class="bd">siege · wrecks buildings</span></button>
+      </div>
     </div>
   </footer>
 
@@ -81,6 +102,7 @@
   <script src="ai.js"></script>
   <script src="input.js"></script>
   <script src="render.js"></script>
+  <script src="ui.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

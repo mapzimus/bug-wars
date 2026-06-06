@@ -1,13 +1,16 @@
 /* ============================================================================
-   Bug Wars — input.js
+   Bug Wars — input.js   (v2)
    ----------------------------------------------------------------------------
-   Turns mouse + keyboard into game orders:
-     - left click            select one ant (shift-click to add)
-     - left click + drag      box-select your ants
-     - right click            move / attack-move / gather (smart per target)
-     - 1..4                   train worker / soldier / fire ant / leafcutter
-     - P pause   R restart   Esc clear selection
-   It reads/writes BW.state but never draws — drawing is render.js.
+   Mouse + keyboard → game orders. v2 adds resource-node assignment (you DO
+   gather, by sending workers) and a build-placement mode for structures.
+
+     left-click            select one of your units (shift adds)
+     left-drag             box-select your units
+     right-click node      send selected workers to mine it (until reassigned)
+     right-click enemy     attack it      right-click ground   move / attack-move
+     right-click your nest send workers home (idle)
+     click a Build button  → placement mode; left-click to place, Esc/RMB cancels
+     1..4 train · P pause · R restart · Esc clear/cancel
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -15,39 +18,19 @@ window.BW = window.BW || {};
 (function () {
   const sys = () => BW.systems;
 
-  // Convert a mouse event to world coordinates. The canvas is internally
-  // 1280x720 but CSS may scale it to fit the window, so we rescale by the
-  // ratio between the drawn size and the internal size.
   function worldPos(e) {
     const c = BW.canvas, r = c.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left) * (c.width  / r.width),
-      y: (e.clientY - r.top)  * (c.height / r.height),
-    };
+    return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
   }
 
-  /* --------------------------------------------------------------------
-     LEARNING SPOT #2 — box-select hit test.   <-- YOU WRITE THIS ONE
-     When the player drags a selection box from (x0,y0) to (x1,y1), return
-     an array of the ids of every unit on `team` whose center is inside the
-     box. Watch out: the player might drag up-and-left, so x1<x0 and y1<y0
-     are both possible — normalise the corners first.
-
-     // const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
-     // ...same for Y... then push u.id when u.x and u.y are inside.
-     ------------------------------------------------------------------ */
+  // LEARNING SPOT — box-select hit test: ids of `team` units inside the rect.
   function unitsInBox(units, x0, y0, x1, y1, team) {
-    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
-    const minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
+    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1), minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
     const ids = [];
-    for (const u of units) {
-      if (u.team !== team) continue;
-      if (u.x >= minX && u.x <= maxX && u.y >= minY && u.y <= maxY) ids.push(u.id);
-    }
+    for (const u of units) if (u.team === team && u.x >= minX && u.x <= maxX && u.y >= minY && u.y <= maxY) ids.push(u.id);
     return ids;
   }
 
-  /* ---- point pickers --------------------------------------------------- */
   function pick(list, p, pad) {
     let best = null, bestD = Infinity;
     for (const e of list) {
@@ -57,101 +40,101 @@ window.BW = window.BW || {};
     return best;
   }
   const playerUnitAt  = p => pick(BW.state.units.filter(u => u.team === 'player'), p, 4);
-  const enemyEntityAt = p => pick([...BW.state.units, ...BW.state.buildings].filter(e => e.team === 'enemy'), p, 4);
-  const foodAt        = p => pick(BW.state.food, p, 5);
+  const enemyAt       = p => pick([...BW.state.units, ...BW.state.buildings].filter(e => e.team === 'enemy'), p, 4);
+  const nodeAt        = p => pick(BW.state.nodes, p, 5);
+  const ownNestAt     = p => pick(BW.state.buildings.filter(b => b.team === 'player' && b.kind === 'nest'), p, 6);
 
-  function addPing(x, y, type) {
-    (BW.state.pings || (BW.state.pings = [])).push({ x, y, type, t: BW.state.time });
+  function addPing(x, y, type) { BW.state.pings.push({ x, y, type, t: BW.state.time }); }
+
+  let toastTimer = null;
+  function toast(msg) {
+    const el = document.getElementById('toast'); if (!el) return;
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1500);
   }
+  BW.toast = toast;
 
   /* ---- selection drag -------------------------------------------------- */
   let dragStart = null, dragging = false;
-  const DRAG_THRESHOLD = 6;
+  const DRAG = 6;
 
   function onMouseDown(e) {
     if (e.button !== 0 || BW.state.phase !== 'playing') return;
-    dragStart = worldPos(e); dragging = false; BW.state.drag = null;
+    const p = worldPos(e);
+    if (BW.state.placing) {                       // place a building
+      const res = BW.tryBuild(BW.state.placing.kind, 'player', p.x, p.y);
+      if (res.ok) { addPing(p.x, p.y, 'build'); if (!e.shiftKey) BW.state.placing = null; }
+      else toast(res.reason);
+      return;
+    }
+    dragStart = p; dragging = false; BW.state.drag = null;
   }
   function onMouseMove(e) {
-    if (!dragStart) return;
     const p = worldPos(e);
-    if (!dragging && Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > DRAG_THRESHOLD) dragging = true;
+    if (BW.state.placing) { BW.state.placeXY = p; return; }
+    if (!dragStart) return;
+    if (!dragging && Math.hypot(p.x - dragStart.x, p.y - dragStart.y) > DRAG) dragging = true;
     if (dragging) BW.state.drag = { x0: dragStart.x, y0: dragStart.y, x1: p.x, y1: p.y };
   }
   function onMouseUp(e) {
     if (e.button !== 0 || !dragStart) return;
     const p = worldPos(e), s = BW.state;
-    if (dragging) {
-      s.selected = new Set(unitsInBox(s.units, dragStart.x, dragStart.y, p.x, p.y, 'player'));
-    } else {
+    if (dragging) s.selected = new Set(unitsInBox(s.units, dragStart.x, dragStart.y, p.x, p.y, 'player'));
+    else {
       const u = playerUnitAt(p);
-      if (u)            { e.shiftKey ? s.selected.add(u.id) : (s.selected = new Set([u.id])); }
+      if (u) { e.shiftKey ? s.selected.add(u.id) : (s.selected = new Set([u.id])); }
       else if (!e.shiftKey) s.selected.clear();
     }
     dragStart = null; dragging = false; s.drag = null;
   }
 
-  /* ---- right-click orders ---------------------------------------------- */
+  /* ---- right-click orders --------------------------------------------- */
   function onContextMenu(e) {
     e.preventDefault();
     const s = BW.state;
-    if (s.phase !== 'playing' || s.selected.size === 0) return;
-    const p = worldPos(e);
-    const enemy = enemyEntityAt(p);
-    const food  = foodAt(p);
-    const n = s.selected.size;
-    let i = 0;
-
+    if (s.phase !== 'playing') return;
+    if (s.placing) { s.placing = null; return; }   // cancel placement
+    if (s.selected.size === 0) return;
+    const p = worldPos(e), enemy = enemyAt(p), node = nodeAt(p), home = ownNestAt(p);
+    const n = s.selected.size; let i = 0;
     for (const id of s.selected) {
       const u = BW.byId(id); if (!u) continue;
-      const a = (i / n) * Math.PI * 2;
-      const spread = n > 1 ? 16 + n * 0.6 : 0;
+      const a = (i / n) * Math.PI * 2, spread = n > 1 ? 16 + n * 0.6 : 0;
       const tx = p.x + Math.cos(a) * spread, ty = p.y + Math.sin(a) * spread;
-
-      if (enemy)                      u.order = { type: 'attack',     tx: enemy.x, ty: enemy.y, targetId: enemy.id };
-      else if (food && u.kind === 'worker') u.order = { type: 'gather', tx: food.x, ty: food.y, targetId: food.id };
-      else if (u.kind === 'worker')   u.order = { type: 'move',       tx, ty, targetId: null };
-      else                            u.order = { type: 'attackMove', tx, ty, targetId: null };
+      if (enemy)                                u.order = { type: 'attack', tx: enemy.x, ty: enemy.y, targetId: enemy.id };
+      else if (node && u.kind === 'worker')     u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
+      else if (home && u.kind === 'worker')     u.order = { type: 'idle',   tx: u.x, ty: u.y, targetId: null };
+      else if (u.kind === 'worker')             u.order = { type: 'move',   tx, ty, targetId: null };
+      else                                      u.order = { type: 'attackMove', tx, ty, targetId: null };
       i++;
     }
-    addPing(p.x, p.y, enemy ? 'attack' : food ? 'gather' : 'move');
+    addPing(p.x, p.y, enemy ? 'attack' : node ? 'gather' : 'move');
   }
 
-  /* ---- build panel ----------------------------------------------------- */
-  let toastTimer = null;
-  function toast(msg) {
-    const el = document.getElementById('toast');
-    if (!el) return;
-    el.textContent = msg; el.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 1400);
-  }
-  function train(kind) {
+  /* ---- panels & keys --------------------------------------------------- */
+  function train(kind) { if (BW.state.phase === 'playing') { const r = BW.tryTrain(kind, 'player'); if (!r.ok) toast(r.reason); } }
+  function build(kind) {
     if (BW.state.phase !== 'playing') return;
-    const res = BW.tryTrain(kind);
-    if (!res.ok) toast(res.reason);
+    BW.state.placing = (BW.state.placing && BW.state.placing.kind === kind) ? null : { kind };
   }
 
-  /* ---- keyboard -------------------------------------------------------- */
-  const HOTKEYS = { '1': 'worker', '2': 'soldier', '3': 'fireant', '4': 'leafcutter' };
+  const HOT = { '1': 'worker', '2': 'soldier', '3': 'fireant', '4': 'leafcutter' };
   function onKeyDown(e) {
-    if (HOTKEYS[e.key]) { train(HOTKEYS[e.key]); return; }
+    if (HOT[e.key]) return train(HOT[e.key]);
     if (e.key === 'p' || e.key === 'P') BW.togglePause();
     if (e.key === 'r' || e.key === 'R') BW.restart();
-    if (e.key === 'Escape') BW.state.selected.clear();
+    if (e.key === 'Escape') { if (BW.state.placing) BW.state.placing = null; else BW.state.selected.clear(); }
   }
 
   function attach(canvas) {
-    canvas.addEventListener('mousedown',   onMouseDown);
-    window.addEventListener('mousemove',    onMouseMove);
-    window.addEventListener('mouseup',      onMouseUp);
-    canvas.addEventListener('contextmenu',  onContextMenu);
-    window.addEventListener('keydown',      onKeyDown);
-
-    document.querySelectorAll('.trainbtn').forEach(btn =>
-      btn.addEventListener('click', () => train(btn.dataset.kind)));
-    document.querySelectorAll('[data-action="restart"]').forEach(btn =>
-      btn.addEventListener('click', () => BW.restart()));
+    canvas.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('keydown', onKeyDown);
+    document.querySelectorAll('.trainbtn').forEach(b => b.addEventListener('click', () => train(b.dataset.train)));
+    document.querySelectorAll('.buildbtn').forEach(b => b.addEventListener('click', () => build(b.dataset.build)));
+    document.querySelectorAll('[data-action="restart"]').forEach(b => b.addEventListener('click', () => BW.restart()));
     const pause = document.getElementById('pauseBtn');
     if (pause) pause.addEventListener('click', () => BW.togglePause());
   }

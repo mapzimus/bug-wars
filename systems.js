@@ -1,278 +1,220 @@
 /* ============================================================================
-   Bug Wars — systems.js
+   Bug Wars — systems.js   (v2)
    ----------------------------------------------------------------------------
-   The BEHAVIOR layer ("the verbs"). Every frame, BW.update(dt) walks all the
-   entities and advances the simulation by dt seconds: units steer, workers
-   gather, nests train, fighters fight, poison ticks, the dead are swept away.
-
-   Nothing here draws anything — drawing is render.js's job. Keeping simulate
-   and draw separate is what makes the game predictable.
+   The BEHAVIOR layer. BW.update(dt) advances the whole simulation each tick:
+   movement, the worker economy (3 resources), combat with counters, building
+   training, tower fire, build placement, and win/lose. Never draws.
    ========================================================================== */
 
 window.BW = window.BW || {};
 
 (function () {
   const cfg = BW.config;
-
-  /* ---- tiny math helpers ---------------------------------------------- */
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
   const dist  = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const idle  = u => ({ type: 'idle', tx: u.x, ty: u.y, targetId: null });
 
   function entityRadius(e) {
-    if (e.kind === 'nest') return cfg.nest.radius;
-    if (e.kind === 'food') return cfg.food.radius;
-    const s = cfg.UNIT_STATS[e.kind];
-    return s ? s.radius : 8;
+    if (e.kind === 'node') return cfg.resources[e.resource].radius;
+    if (cfg.BUILDING_STATS[e.kind]) return cfg.BUILDING_STATS[e.kind].radius;
+    return cfg.UNIT_STATS[e.kind].radius;
   }
+  function classOf(e) {
+    if (e.kind === 'node') return 'resource';
+    if (cfg.BUILDING_STATS[e.kind]) return 'building';
+    return cfg.UNIT_STATS[e.kind].class;
+  }
+  function damageOf(e) {
+    if (cfg.BUILDING_STATS[e.kind]) return cfg.BUILDING_STATS[e.kind].damage || 0;
+    return cfg.UNIT_STATS[e.kind].damage;
+  }
+  function cooldownOf(e) {
+    if (cfg.BUILDING_STATS[e.kind]) return cfg.BUILDING_STATS[e.kind].cooldown || 1;
+    return cfg.UNIT_STATS[e.kind].cooldown;
+  }
+
+  /* ---- resource bookkeeping ------------------------------------------- */
+  const canAfford = (store, cost) => Object.keys(cost).every(k => store[k] >= cost[k]);
+  const spend     = (store, cost) => { for (const k in cost) store[k] -= cost[k]; };
 
   /* ====================================================================
      MOVEMENT
      ==================================================================== */
-
-  // Sum of little pushes away from neighbours so units don't pile into one dot.
   function separationVec(u) {
     const r = cfg.separationRadius;
     let px = 0, py = 0;
     for (const o of BW.state.units) {
       if (o === u) continue;
-      const dx = u.x - o.x, dy = u.y - o.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 > 0 && d2 < r * r) {
-        const d = Math.sqrt(d2);
-        const push = (r - d) / r;          // 1 when touching, 0 at the edge
-        px += (dx / d) * push;
-        py += (dy / d) * push;
-      }
+      const dx = u.x - o.x, dy = u.y - o.y, d2 = dx * dx + dy * dy;
+      if (d2 > 0 && d2 < r * r) { const d = Math.sqrt(d2), k = (r - d) / r; px += (dx / d) * k; py += (dy / d) * k; }
     }
-    const strength = 45;
-    return [px * strength, py * strength];
+    return [px * 45, py * 45];
   }
 
-  // Shove a position out of any rock it lands inside.
+  // Push a position out of rocks AND blocking walls.
   function avoidObstacles(u, nx, ny) {
     const rad = entityRadius(u);
-    for (const ob of BW.state.obstacles) {
-      const dx = nx - ob.x, dy = ny - ob.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const min = ob.r + rad;
-      if (d < min) { nx = ob.x + (dx / d) * min; ny = ob.y + (dy / d) * min; }
-    }
+    const push = (ox, oy, orr) => {
+      const dx = nx - ox, dy = ny - oy, d = Math.hypot(dx, dy) || 1, min = orr + rad;
+      if (d < min) { nx = ox + (dx / d) * min; ny = oy + (dy / d) * min; }
+    };
+    for (const o of BW.state.obstacles) push(o.x, o.y, o.r);
+    for (const b of BW.state.buildings) if (cfg.BUILDING_STATS[b.kind].blocks) push(b.x, b.y, entityRadius(b));
     return [nx, ny];
   }
 
-  // Steer u toward (tx,ty). Returns true once it has basically arrived.
   function moveToward(u, tx, ty, dt) {
     const s = cfg.UNIT_STATS[u.kind];
-    const dx = tx - u.x, dy = ty - u.y;
-    const d = Math.hypot(dx, dy) || 1;
-    const arrive = 5;
-
+    const dx = tx - u.x, dy = ty - u.y, d = Math.hypot(dx, dy) || 1, arrive = 5;
     let mvx = 0, mvy = 0;
-    if (d > arrive) {
-      mvx = (dx / d) * s.speed;
-      mvy = (dy / d) * s.speed;
-      u.heading = Math.atan2(dy, dx);
-    }
-    const [sx, sy] = separationVec(u);
-    mvx += sx; mvy += sy;
-
-    let nx = u.x + mvx * dt;
-    let ny = u.y + mvy * dt;
+    if (d > arrive) { mvx = (dx / d) * s.speed; mvy = (dy / d) * s.speed; u.heading = Math.atan2(dy, dx); }
+    const [sx, sy] = separationVec(u); mvx += sx; mvy += sy;
+    let nx = u.x + mvx * dt, ny = u.y + mvy * dt;
     [nx, ny] = avoidObstacles(u, nx, ny);
-    u.x = clamp(nx, 0, cfg.world.width);
-    u.y = clamp(ny, 0, cfg.world.height);
+    u.x = clamp(nx, 0, cfg.world.width); u.y = clamp(ny, 0, cfg.world.height);
     return d <= arrive;
   }
 
   /* ====================================================================
-     COMBAT
+     COMBAT (with counters)
      ==================================================================== */
-
-  // Nearest enemy (unit, then building) inside this unit's aggro radius.
-  function acquireTarget(u) {
-    const aggro = cfg.UNIT_STATS[u.kind].aggro;
-    if (aggro <= 0) return null;
-    let best = null, bestD = aggro;
+  function nearestEnemy(x, y, team, range) {
+    let best = null, bestD = range;
     for (const o of BW.state.units) {
-      if (o.team === u.team) continue;
-      const d = dist(u, o);
+      if (o.team === team) continue;
+      const d = Math.hypot(o.x - x, o.y - y);
       if (d < bestD) { bestD = d; best = o; }
     }
     for (const b of BW.state.buildings) {
-      if (b.team === u.team) continue;
-      const d = dist(u, b) - entityRadius(b);
+      if (b.team === team) continue;
+      const d = Math.hypot(b.x - x, b.y - y) - entityRadius(b);
       if (d < bestD) { bestD = d; best = b; }
     }
     return best;
   }
+  const acquireTarget = u => nearestEnemy(u.x, u.y, u.team, cfg.UNIT_STATS[u.kind].aggro);
 
-  // Nearest enemy within guard range of this unit's OWN nest — so idle
-  // fighters proactively march out to meet attackers instead of standing still.
-  function nestThreat(u) {
-    const nest = nearestNest(u);
-    if (!nest) return null;
-    let best = null, bestD = cfg.guardRange;
-    for (const o of BW.state.units) {
-      if (o.team === u.team) continue;
-      const d = dist(o, nest);
-      if (d < bestD) { bestD = d; best = o; }
+  function nearestOwn(team, pred) {
+    let best = null, bestD = Infinity;
+    for (const b of BW.state.buildings) {
+      if (b.team !== team || !pred(b)) continue;
+      best = best || b;  // first match is fine at this scale
     }
     return best;
   }
+  function nestThreat(u) {
+    const nest = nearestOwn(u.team, b => b.kind === 'nest');
+    if (!nest) return null;
+    return nearestEnemy(nest.x, nest.y, u.team, cfg.guardRange);
+  }
 
   /* --------------------------------------------------------------------
-     LEARNING SPOT #3 — the damage formula.
-     This is the single most "game-feel" piece of math in the whole game.
-     Right now it deals the attacker's flat damage, with one twist: a
-     leafcutter ant hits BUILDINGS for `buildingBonus` times as much (its
-     job is to chew through the enemy nest). Tweak this however you like —
-     add armor, add bonus damage between specific ant types, etc.
+     LEARNING SPOT — the damage formula. Looks up the COUNTERS table by the
+     attacker's and target's class. Edit config.COUNTERS to reshape matchups.
      ------------------------------------------------------------------ */
-  function applyDamage(target, base, attackerKind, targetKind) {
-    let dmg = base;
-    const atk = cfg.UNIT_STATS[attackerKind];
-    if (targetKind === 'nest' && atk && atk.buildingBonus) {
-      dmg *= atk.buildingBonus;
-    }
-    target.hp -= dmg;
+  function applyDamage(target, base, attacker) {
+    const aCls = classOf(attacker), tCls = classOf(target);
+    const mult = (cfg.COUNTERS[aCls] && cfg.COUNTERS[aCls][tCls]) || 1;
+    target.hp -= base * mult;
   }
-
   function strike(attacker, target) {
+    applyDamage(target, damageOf(attacker), attacker);
     const s = cfg.UNIT_STATS[attacker.kind];
-    applyDamage(target, s.damage, attacker.kind, target.kind);
-    if (s.venom && target.maxHp) {        // fire-ant poison; buildings (no maxHp) immune
-      target.venomDps   = s.venom.dps;    // refresh, don't stack
-      target.venomTimer = s.venom.duration;
-    }
+    if (s && s.venom && target.maxHp) { target.venomDps = s.venom.dps; target.venomTimer = s.venom.duration; }
+    attacker.attackCooldown = cooldownOf(attacker);
   }
-
-  // Close to within range and hit on cooldown; otherwise keep approaching.
   function pursueAndStrike(u, target, dt) {
     const s = cfg.UNIT_STATS[u.kind];
     const reach = s.range + entityRadius(u) + entityRadius(target);
     if (dist(u, target) <= reach) {
       u.heading = Math.atan2(target.y - u.y, target.x - u.x);
-      const [sx, sy] = separationVec(u);   // still fan out while swinging
-      u.x += sx * dt; u.y += sy * dt;
-      if (u.attackCooldown <= 0) {
-        strike(u, target);
-        u.attackCooldown = s.cooldown;
-      }
-    } else {
-      moveToward(u, target.x, target.y, dt);
-    }
+      const [sx, sy] = separationVec(u); u.x += sx * dt; u.y += sy * dt;
+      if (u.attackCooldown <= 0) strike(u, target);
+    } else moveToward(u, target.x, target.y, dt);
   }
-
   function tickVenom(u, dt) {
-    if (u.venomTimer > 0) {
-      u.hp -= u.venomDps * dt;
-      u.venomTimer -= dt;
-      if (u.venomTimer <= 0) { u.venomTimer = 0; u.venomDps = 0; }
-    }
+    if (u.venomTimer > 0) { u.hp -= u.venomDps * dt; u.venomTimer -= dt; if (u.venomTimer <= 0) { u.venomTimer = 0; u.venomDps = 0; } }
   }
 
   /* ====================================================================
-     WORKER ECONOMY
+     WORKER ECONOMY (3 resources, player-driven)
      ==================================================================== */
-
-  function nearestNest(u) {
+  function nearestDropoff(u) {
     let best = null, bestD = Infinity;
     for (const b of BW.state.buildings) {
-      if (b.team !== u.team || b.kind !== 'nest') continue;
-      const d = dist(u, b);
-      if (d < bestD) { bestD = d; best = b; }
+      if (b.team !== u.team || !cfg.BUILDING_STATS[b.kind].drop) continue;
+      const d = dist(u, b); if (d < bestD) { bestD = d; best = b; }
     }
     return best;
   }
-
-  function nearestFood(p) {
+  function nearestNode(p, resource) {
     let best = null, bestD = Infinity;
-    for (const f of BW.state.food) {
-      if (f.amount <= 0) continue;
-      const d = Math.hypot(f.x - p.x, f.y - p.y);
-      if (d < bestD) { bestD = d; best = f; }
+    for (const n of BW.state.nodes) {
+      if (n.amount <= 0 || (resource && n.resource !== resource)) continue;
+      const d = Math.hypot(n.x - p.x, n.y - p.y); if (d < bestD) { bestD = d; best = n; }
     }
     return best;
   }
 
   function workerGather(u, dt) {
-    let node = BW.byId(u.order.targetId);
-    if (!node || node.amount <= 0) {
-      node = nearestFood(u);
-      if (!node) { u.order = { type: 'idle', tx: u.x, ty: u.y, targetId: null }; return; }
-      u.order.targetId = node.id;
-    }
+    const node = BW.byId(u.order.targetId);
+    if (!node || node.kind !== 'node' || node.amount <= 0) { u.order = idle(u); return; }
     const reach = entityRadius(node) + entityRadius(u) + 2;
     if (dist(u, node) > reach) { moveToward(u, node.x, node.y, dt); return; }
-
-    const take = Math.min(cfg.gather.rate * dt, cfg.gather.carryCap - u.carrying, node.amount);
-    u.carrying  += take;
-    node.amount -= take;
+    u.carryType = node.resource;
+    const take = Math.min(cfg.gather.rate[node.resource] * dt, cfg.gather.carryCap - u.carrying, node.amount);
+    u.carrying += take; node.amount -= take;
     if (u.carrying >= cfg.gather.carryCap || node.amount <= 0) u.order.type = 'returning';
   }
-
   function workerReturn(u, dt) {
-    const nest = nearestNest(u);
-    if (!nest) { u.order.type = 'idle'; return; }
-    const reach = entityRadius(nest) + entityRadius(u) + 2;
-    if (dist(u, nest) > reach) { moveToward(u, nest.x, nest.y, dt); return; }
-
-    if (u.team === 'player') BW.state.playerFood += u.carrying;
-    u.carrying = 0;
-
-    const node = BW.byId(u.order.targetId) || nearestFood(u);
-    if (node && node.amount > 0) u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
-    else u.order = { type: 'idle', tx: u.x, ty: u.y, targetId: null };
+    const drop = nearestDropoff(u);
+    if (!drop) { u.order = idle(u); return; }
+    const reach = entityRadius(drop) + entityRadius(u) + 2;
+    if (dist(u, drop) > reach) { moveToward(u, drop.x, drop.y, dt); return; }
+    if (u.carrying > 0 && u.carryType) {
+      let amt = u.carrying;
+      if (u.team === 'enemy') amt *= cfg.difficulties[BW.state.difficulty].ecoMult;  // mild Hard eco edge
+      BW.state.res[u.team][u.carryType] += amt;
+    }
+    u.carrying = 0; u.carryType = null;
+    const node = BW.byId(u.order.targetId);
+    if (node && node.kind === 'node' && node.amount > 0) u.order.type = 'gather';
+    else u.order = idle(u);   // node spent → wait for new orders (player decides)
   }
 
   /* ====================================================================
-     PER-UNIT TICK
+     PER-UNIT + PER-BUILDING TICKS
      ==================================================================== */
-
   function updateUnit(u, dt) {
     if (u.attackCooldown > 0) u.attackCooldown -= dt;
     tickVenom(u, dt);
     if (u.hp <= 0) return;
-
     const stats = cfg.UNIT_STATS[u.kind];
 
     switch (u.order.type) {
       case 'gather':    workerGather(u, dt); break;
       case 'returning': workerReturn(u, dt); break;
-
       case 'attack': {
         const t = BW.byId(u.order.targetId);
-        if (!t || t.hp <= 0) { u.order = { type: 'idle', tx: u.x, ty: u.y, targetId: null }; break; }
-        pursueAndStrike(u, t, dt);
-        break;
+        if (!t || t.hp === undefined || t.hp <= 0) { u.order = idle(u); break; }
+        pursueAndStrike(u, t, dt); break;
       }
-
       case 'attackMove': {
-        const t = acquireTarget(u);                 // fight anything en route
+        const t = acquireTarget(u);
         if (t) pursueAndStrike(u, t, dt);
-        else if (moveToward(u, u.order.tx, u.order.ty, dt))
-          u.order = { type: 'idle', tx: u.x, ty: u.y, targetId: null };
+        else if (moveToward(u, u.order.tx, u.order.ty, dt)) u.order = idle(u);
         break;
       }
-
       case 'move':
-        if (moveToward(u, u.order.tx, u.order.ty, dt))
-          u.order = { type: 'idle', tx: u.x, ty: u.y, targetId: null };
+        if (moveToward(u, u.order.tx, u.order.ty, dt)) u.order = idle(u);
         break;
-
       case 'idle':
       default: {
-        if (u.kind === 'worker') {
-          // Workers gather on their own — you never have to babysit them.
-          const food = nearestFood(u);
-          if (food) { u.order = { type: 'gather', tx: food.x, ty: food.y, targetId: food.id }; break; }
-        } else if (stats.aggro > 0) {
-          // Fighters defend on their own: hit anything close, or move to
-          // intercept an enemy that's menacing the nest.
+        // NO auto-gather: workers wait for your orders. Fighters auto-defend.
+        if (u.kind !== 'worker' && stats.aggro > 0) {
           const t = acquireTarget(u) || nestThreat(u);
           if (t) { pursueAndStrike(u, t, dt); break; }
         }
-        // truly nothing to do — just settle apart from neighbours
         const [sx, sy] = separationVec(u);
         u.x = clamp(u.x + sx * dt, 0, cfg.world.width);
         u.y = clamp(u.y + sy * dt, 0, cfg.world.height);
@@ -280,58 +222,84 @@ window.BW = window.BW || {};
     }
   }
 
-  /* ====================================================================
-     TRAINING (nests turning food into ants)
-     ==================================================================== */
-
   function updateBuilding(b, dt) {
-    if (b.trainQueue.length === 0) { b.trainTimer = 0; return; }
-    if (b.trainTimer <= 0) b.trainTimer = cfg.UNIT_STATS[b.trainQueue[0]].buildTime;
-    b.trainTimer -= dt;
-    if (b.trainTimer <= 0) {
-      const kind = b.trainQueue.shift();
-      const u = BW.world.createUnit(kind, b.team, b.rallyX, b.rallyY);
-      BW.state.units.push(u);
-      b.trainTimer = b.trainQueue.length ? cfg.UNIT_STATS[b.trainQueue[0]].buildTime : 0;
+    const s = cfg.BUILDING_STATS[b.kind];
+    if (b.attackCooldown > 0) b.attackCooldown -= dt;
+
+    if (s.trains && b.trainQueue.length) {            // production
+      if (b.trainTimer <= 0) b.trainTimer = cfg.UNIT_STATS[b.trainQueue[0]].buildTime;
+      b.trainTimer -= dt;
+      if (b.trainTimer <= 0) {
+        const kind = b.trainQueue.shift();
+        BW.state.units.push(BW.world.createUnit(kind, b.team, b.rallyX, b.rallyY));
+        b.trainTimer = b.trainQueue.length ? cfg.UNIT_STATS[b.trainQueue[0]].buildTime : 0;
+      }
+    }
+    if (s.aggro && b.attackCooldown <= 0) {           // tower fire
+      const t = nearestEnemy(b.x, b.y, b.team, s.range + s.radius);
+      if (t && dist(b, t) <= s.range + s.radius + entityRadius(t)) strike(b, t);
     }
   }
 
-  // Called by the build-panel buttons (input.js). Returns {ok, reason}.
-  function tryTrain(kind) {
-    const s = BW.state;
+  /* ====================================================================
+     TRAINING + BUILDING (player & AI use these)
+     ==================================================================== */
+  const countUnits = team => BW.state.units.filter(u => u.team === team).length;
+  const queued     = team => BW.state.buildings.filter(b => b.team === team)
+                              .reduce((n, b) => n + (b.trainQueue ? b.trainQueue.length : 0), 0);
+  function producerFor(kind, team) {
+    return nearestOwn(team, b => cfg.BUILDING_STATS[b.kind].trains && cfg.BUILDING_STATS[b.kind].trains.includes(kind));
+  }
+
+  function tryTrain(kind, team) {
     const stat = cfg.UNIT_STATS[kind];
-    const nest = s.buildings.find(b => b.team === 'player' && b.kind === 'nest');
-    if (!nest) return { ok: false, reason: 'Your nest is gone' };
+    const producer = producerFor(kind, team);
+    if (!producer) {
+      const where = stat.trainedAt === 'barracks' ? 'a Barracks' : stat.trainedAt === 'workshop' ? 'a Workshop' : 'a nest';
+      return { ok: false, reason: `Build ${where} first` };
+    }
+    if (countUnits(team) + queued(team) >= cfg.popCap) return { ok: false, reason: 'Population cap reached' };
+    if (!canAfford(BW.state.res[team], stat.cost)) return { ok: false, reason: 'Not enough resources' };
+    spend(BW.state.res[team], stat.cost);
+    producer.trainQueue.push(kind);
+    return { ok: true };
+  }
 
-    const have = s.units.filter(u => u.team === 'player').length
-               + s.buildings.filter(b => b.team === 'player').reduce((n, b) => n + b.trainQueue.length, 0);
-    if (have >= cfg.popCap)        return { ok: false, reason: 'Population cap reached' };
-    if (s.playerFood < stat.cost)  return { ok: false, reason: 'Not enough food' };
-
-    s.playerFood -= stat.cost;
-    nest.trainQueue.push(kind);
+  function validPlacement(kind, x, y) {
+    const r = cfg.BUILDING_STATS[kind].radius, W = cfg.world.width, H = cfg.world.height;
+    if (x < r || y < r || x > W - r || y > H - r) return false;
+    for (const o of BW.state.obstacles) if (Math.hypot(x - o.x, y - o.y) < o.r + r) return false;
+    for (const b of BW.state.buildings) if (Math.hypot(x - b.x, y - b.y) < entityRadius(b) + r + 4) return false;
+    for (const n of BW.state.nodes) if (Math.hypot(x - n.x, y - n.y) < entityRadius(n) + r + 2) return false;
+    return true;
+  }
+  function tryBuild(kind, team, x, y) {
+    const s = cfg.BUILDING_STATS[kind];
+    if (!canAfford(BW.state.res[team], s.cost)) return { ok: false, reason: 'Not enough Mud' };
+    if (!validPlacement(kind, x, y)) return { ok: false, reason: "Can't build there" };
+    spend(BW.state.res[team], s.cost);
+    BW.state.buildings.push(BW.world.createBuilding(kind, team, x, y));
     return { ok: true };
   }
 
   /* ====================================================================
      MAIN UPDATE
      ==================================================================== */
-
   function update(dt) {
     const s = BW.state;
     if (s.phase !== 'playing') return;
     s.time += dt;
-    if (s.pings) s.pings = s.pings.filter(pg => s.time - pg.t < 0.5);
-
+    if (s.pings.length)  s.pings  = s.pings.filter(p => s.time - p.t < 0.5);
+    if (s.alerts.length) s.alerts = s.alerts.filter(a => a.until > s.time);
     for (const u of s.units)     updateUnit(u, dt);
     for (const b of s.buildings) updateBuilding(b, dt);
     if (BW.ai) BW.ai.update(s, dt);
-
     BW.removeDead();
   }
 
-  // expose
   BW.update   = update;
   BW.tryTrain = tryTrain;
-  BW.systems  = { entityRadius, nearestFood, acquireTarget, dist };
+  BW.tryBuild = tryBuild;
+  BW.systems  = { entityRadius, classOf, dist, canAfford, nearestEnemy, acquireTarget,
+                  nearestNode, nearestDropoff, producerFor, validPlacement, countUnits, queued };
 })();
