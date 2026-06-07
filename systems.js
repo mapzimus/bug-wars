@@ -51,15 +51,18 @@ window.BW = window.BW || {};
     return [px * 45, py * 45];
   }
 
-  // Push a position out of rocks AND blocking walls.
+  // Push a position out of rocks AND blocking walls. Two relaxation passes so a
+  // unit squeezed between two blockers isn't shoved straight back into one.
   function avoidObstacles(u, nx, ny) {
     const rad = entityRadius(u);
     const push = (ox, oy, orr) => {
       const dx = nx - ox, dy = ny - oy, d = Math.hypot(dx, dy) || 1, min = orr + rad;
       if (d < min) { nx = ox + (dx / d) * min; ny = oy + (dy / d) * min; }
     };
-    for (const o of BW.state.obstacles) push(o.x, o.y, o.r);
-    for (const b of BW.state.buildings) if (cfg.BUILDING_STATS[b.kind].blocks) push(b.x, b.y, entityRadius(b));
+    for (let pass = 0; pass < 2; pass++) {
+      for (const o of BW.state.obstacles) push(o.x, o.y, o.r);
+      for (const b of BW.state.buildings) if (cfg.BUILDING_STATS[b.kind].blocks) push(b.x, b.y, entityRadius(b));
+    }
     return [nx, ny];
   }
 
@@ -67,7 +70,23 @@ window.BW = window.BW || {};
     const s = cfg.UNIT_STATS[u.kind];
     const dx = tx - u.x, dy = ty - u.y, d = Math.hypot(dx, dy) || 1, arrive = 5;
     let mvx = 0, mvy = 0;
-    if (d > arrive) { mvx = (dx / d) * s.speed; mvy = (dy / d) * s.speed; u.heading = Math.atan2(dy, dx); }
+    if (d > arrive) {
+      let vx = dx / d, vy = dy / d;                       // desired direction
+      const rad = entityRadius(u);
+      const steer = (ox, oy, orr) => {                    // slide around a blocker on the path ahead
+        const rx = ox - u.x, ry = oy - u.y, rd = Math.hypot(rx, ry) || 1;
+        if (rx * vx + ry * vy > 0 && rd < orr + rad + 30) {        // it's ahead and close
+          const side = (rx * -vy + ry * vx) > 0 ? -1 : 1;          // pick the near side to round
+          const tnx = -vy, tny = vx;                               // tangent (snapshot)
+          vx += side * tnx * 1.6; vy += side * tny * 1.6;
+        }
+      };
+      for (const o of BW.state.obstacles) steer(o.x, o.y, o.r);
+      for (const b of BW.state.buildings) if (cfg.BUILDING_STATS[b.kind].blocks) steer(b.x, b.y, entityRadius(b));
+      const vl = Math.hypot(vx, vy) || 1;
+      mvx = (vx / vl) * s.speed; mvy = (vy / vl) * s.speed;
+      u.heading = Math.atan2(mvy, mvx);
+    }
     const [sx, sy] = separationVec(u); mvx += sx; mvy += sy;
     let nx = u.x + mvx * dt, ny = u.y + mvy * dt;
     [nx, ny] = avoidObstacles(u, nx, ny);
@@ -79,18 +98,23 @@ window.BW = window.BW || {};
      COMBAT (with counters)
      ==================================================================== */
   function nearestEnemy(x, y, team, range) {
-    let best = null, bestD = range;
+    // Prefer a live enemy UNIT in range (kill the threat first); only target an
+    // enemy building when no unit is in range. (Fixes towers/defenders ignoring
+    // an adjacent attacker to plink the distant nest.)
+    let bestU = null, bU = range;
     for (const o of BW.state.units) {
       if (o.team === team) continue;
       const d = Math.hypot(o.x - x, o.y - y);
-      if (d < bestD) { bestD = d; best = o; }
+      if (d < bU) { bU = d; bestU = o; }
     }
+    if (bestU) return bestU;
+    let bestB = null, bB = range;
     for (const b of BW.state.buildings) {
       if (b.team === team) continue;
-      const d = Math.hypot(b.x - x, b.y - y) - entityRadius(b);
-      if (d < bestD) { bestD = d; best = b; }
+      const d = Math.max(0, Math.hypot(b.x - x, b.y - y) - entityRadius(b));   // edge distance, never negative
+      if (d < bB) { bB = d; bestB = b; }
     }
-    return best;
+    return bestB;
   }
   const acquireTarget = u => nearestEnemy(u.x, u.y, u.team, cfg.UNIT_STATS[u.kind].aggro);
 
@@ -120,7 +144,9 @@ window.BW = window.BW || {};
   function strike(attacker, target) {
     applyDamage(target, damageOf(attacker), attacker);
     const s = cfg.UNIT_STATS[attacker.kind];
-    if (s && s.venom && target.maxHp) { target.venomDps = s.venom.dps; target.venomTimer = s.venom.duration; }
+    if (s && s.venom && target.maxHp && classOf(target) !== 'building') {   // venom is anti-unit only
+      target.venomDps = s.venom.dps; target.venomTimer = s.venom.duration;
+    }
     attacker.attackCooldown = cooldownOf(attacker);
   }
   function pursueAndStrike(u, target, dt) {
@@ -128,7 +154,10 @@ window.BW = window.BW || {};
     const reach = s.range + entityRadius(u) + entityRadius(target);
     if (dist(u, target) <= reach) {
       u.heading = Math.atan2(target.y - u.y, target.x - u.x);
-      const [sx, sy] = separationVec(u); u.x += sx * dt; u.y += sy * dt;
+      const [sx, sy] = separationVec(u);                       // fan out while swinging...
+      let nx = u.x + sx * dt, ny = u.y + sy * dt;
+      [nx, ny] = avoidObstacles(u, nx, ny);                    // ...but stay out of rocks
+      u.x = clamp(nx, 0, cfg.world.width); u.y = clamp(ny, 0, cfg.world.height);  // ...and on the map
       if (u.attackCooldown <= 0) strike(u, target);
     } else moveToward(u, target.x, target.y, dt);
   }
@@ -216,8 +245,9 @@ window.BW = window.BW || {};
           if (t) { pursueAndStrike(u, t, dt); break; }
         }
         const [sx, sy] = separationVec(u);
-        u.x = clamp(u.x + sx * dt, 0, cfg.world.width);
-        u.y = clamp(u.y + sy * dt, 0, cfg.world.height);
+        let nx = u.x + sx * dt, ny = u.y + sy * dt;
+        [nx, ny] = avoidObstacles(u, nx, ny);
+        u.x = clamp(nx, 0, cfg.world.width); u.y = clamp(ny, 0, cfg.world.height);
       }
     }
   }

@@ -19,7 +19,7 @@ BW.config = {
   /* ---- Economy --------------------------------------------------------- */
   // Each side starts with this. Food trains units; Mud builds structures;
   // Honeydew is scarce and buys elite units / (later) upgrades.
-  startingResources: { food: 200, mud: 100, honeydew: 0 },
+  startingResources: { food: 200, mud: 150, honeydew: 0 },
   popCap: 50,
   startingWorkers: 5,
 
@@ -96,7 +96,7 @@ BW.config = {
   COUNTERS: {
     infantry:   { skirmisher: 1.6 },
     skirmisher: { siege: 1.6 },
-    siege:      { building: 4.0, infantry: 1.4 },
+    siege:      { building: 4.0, infantry: 1.2 },
     building:   {},     // towers have no bonus damage
     worker:     {},
   },
