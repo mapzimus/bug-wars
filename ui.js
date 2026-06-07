@@ -28,12 +28,15 @@ window.BW = window.BW || {};
     const s = BW.state;
     const menu = $('menu'); if (menu) menu.classList.toggle('show', s.phase === 'menu');
 
+    const sb = $('spectateBadge');
+    if (sb) sb.classList.toggle('show', !!s.watchMode && s.phase === 'playing');
+
     const wb = $('warnBanner');
-    if (wb) wb.classList.toggle('show', s.phase === 'playing' && s.alerts.some(a => a.type === 'incoming' && a.until > s.time));
+    if (wb) wb.classList.toggle('show', !s.watchMode && s.phase === 'playing' && s.alerts.some(a => a.type === 'incoming' && a.until > s.time));
 
     const tc = $('tutorial');
     if (tc) {
-      if (s.phase !== 'playing') tc.classList.remove('show');
+      if (s.phase !== 'playing' || s.watchMode) tc.classList.remove('show');   // no tutorial while spectating
       else {
         while (stepIdx < STEPS.length - 1 && STEPS[stepIdx].done(s)) stepIdx++;
         const t = $('tutorialText'); if (t) t.textContent = STEPS[stepIdx].text;
@@ -45,6 +48,7 @@ window.BW = window.BW || {};
 
   function attach() {
     document.querySelectorAll('.diffbtn').forEach(b => b.addEventListener('click', () => BW.startGame(b.dataset.diff)));
+    document.querySelectorAll('.watchbtn').forEach(b => b.addEventListener('click', () => BW.startGame(b.dataset.diff, { playerAI: true })));
     document.querySelectorAll('[data-action="menu"]').forEach(b => b.addEventListener('click', () => BW.toMenu()));
     const close = $('tutorialClose'); if (close) close.addEventListener('click', () => { const tc = $('tutorial'); if (tc) tc.style.display = 'none'; });
   }

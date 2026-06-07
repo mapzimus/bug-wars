@@ -172,9 +172,16 @@ window.BW = window.BW || {};
   function updateOverlay() {
     const s = BW.state, ov = $('overlay'); if (!ov) return;
     if (s.phase !== 'won' && s.phase !== 'lost') { ov.classList.remove('show'); return; }
-    $('overlayTitle').textContent = s.phase === 'won' ? 'Victory' : 'Defeat';
-    $('overlayTitle').className = s.phase === 'won' ? 'win' : 'lose';
-    $('overlayMsg').textContent = s.phase === 'won' ? 'The rival colony is broken. The garden is yours.' : 'Your nest has fallen. The colony scatters.';
+    const blue = s.phase === 'won';
+    if (s.watchMode) {
+      $('overlayTitle').textContent = blue ? 'Blue wins' : 'Red wins';
+      $('overlayTitle').className = blue ? 'win' : 'lose';
+      $('overlayMsg').textContent = 'AI vs AI — ' + (blue ? 'the blue colony' : 'the red colony') + ' destroyed the rival nest.';
+    } else {
+      $('overlayTitle').textContent = blue ? 'Victory' : 'Defeat';
+      $('overlayTitle').className = blue ? 'win' : 'lose';
+      $('overlayMsg').textContent = blue ? 'The rival colony is broken. The garden is yours.' : 'Your nest has fallen. The colony scatters.';
+    }
     ov.classList.add('show');
   }
 

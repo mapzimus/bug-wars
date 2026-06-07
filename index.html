@@ -34,6 +34,7 @@
   <main class="stage">
     <canvas id="gameCanvas" width="1280" height="720"></canvas>
     <div id="warnBanner" class="warn-banner">⚠ The red colony is attacking!</div>
+    <div id="spectateBadge" class="spectate-badge">👁 SPECTATING · AI vs AI · press R to restart</div>
     <div id="toast" class="toast"></div>
 
     <!-- Tutorial coaching card -->
@@ -57,6 +58,11 @@
           <button class="ctrl big diffbtn" data-diff="easy">Easy</button>
           <button class="ctrl big diffbtn" data-diff="normal">Normal</button>
           <button class="ctrl big diffbtn" data-diff="hard">Hard</button>
+        </div>
+        <div class="watchrow">
+          <span class="watch-label">New? Watch two AIs play it first:</span>
+          <button class="ctrl watchbtn" data-diff="easy">👁 Watch (Easy)</button>
+          <button class="ctrl watchbtn" data-diff="normal">👁 Watch (Normal)</button>
         </div>
       </div>
     </div>

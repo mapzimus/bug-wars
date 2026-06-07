@@ -173,7 +173,7 @@ window.BW = window.BW || {};
     if (dist(u, drop) > reach) { moveToward(u, drop.x, drop.y, dt); return; }
     if (u.carrying > 0 && u.carryType) {
       let amt = u.carrying;
-      if (u.team === 'enemy') amt *= cfg.difficulties[BW.state.difficulty].ecoMult;  // mild Hard eco edge
+      if (BW.state.controllers[u.team] === 'ai') amt *= cfg.difficulties[BW.state.difficulty].ecoMult;  // mild Hard eco edge (symmetric in AI-vs-AI)
       BW.state.res[u.team][u.carryType] += amt;
     }
     u.carrying = 0; u.carryType = null;
@@ -291,6 +291,10 @@ window.BW = window.BW || {};
     s.time += dt;
     if (s.pings.length)  s.pings  = s.pings.filter(p => s.time - p.t < 0.5);
     if (s.alerts.length) s.alerts = s.alerts.filter(a => a.until > s.time);
+    for (const n of s.nodes) {                 // resources slowly regrow
+      const rg = cfg.resources[n.resource].regen;
+      if (rg && n.amount < n.max) n.amount = Math.min(n.max, n.amount + rg * dt);
+    }
     for (const u of s.units)     updateUnit(u, dt);
     for (const b of s.buildings) updateBuilding(b, dt);
     if (BW.ai) BW.ai.update(s, dt);

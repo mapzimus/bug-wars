@@ -92,7 +92,7 @@ window.BW = window.BW || {};
   function onContextMenu(e) {
     e.preventDefault();
     const s = BW.state;
-    if (s.phase !== 'playing') return;
+    if (s.phase !== 'playing' || !human()) return;   // spectating AI-vs-AI: no commands
     if (s.placing) { s.placing = null; return; }   // cancel placement
     if (s.selected.size === 0) return;
     const p = worldPos(e), enemy = enemyAt(p), node = nodeAt(p), home = ownNestAt(p);
@@ -112,9 +112,10 @@ window.BW = window.BW || {};
   }
 
   /* ---- panels & keys --------------------------------------------------- */
-  function train(kind) { if (BW.state.phase === 'playing') { const r = BW.tryTrain(kind, 'player'); if (!r.ok) toast(r.reason); } }
+  const human = () => BW.state.controllers && BW.state.controllers.player === 'human';
+  function train(kind) { if (BW.state.phase === 'playing' && human()) { const r = BW.tryTrain(kind, 'player'); if (!r.ok) toast(r.reason); } }
   function build(kind) {
-    if (BW.state.phase !== 'playing') return;
+    if (BW.state.phase !== 'playing' || !human()) return;
     BW.state.placing = (BW.state.placing && BW.state.placing.kind === kind) ? null : { kind };
   }
 

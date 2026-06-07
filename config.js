@@ -30,9 +30,11 @@ BW.config = {
 
   // Resource node types scattered on the map.
   resources: {
-    food:     { amount: 240, radius: 10, color: '#b6d36b', label: 'Food' },
-    mud:      { amount: 340, radius: 11, color: '#a07a4e', label: 'Mud'  },
-    honeydew: { amount: 150, radius: 9,  color: '#ffd166', label: 'Honeydew' },
+    // Big piles + slow regen (per second) so the economy NEVER permanently
+    // collapses — there's always a trickle to recover on. amount = starting/max.
+    food:     { amount: 600, regen: 2.6, radius: 11, color: '#b6d36b', label: 'Food' },
+    mud:      { amount: 700, regen: 1.6, radius: 12, color: '#a07a4e', label: 'Mud'  },
+    honeydew: { amount: 380, regen: 1.0, radius: 10, color: '#ffd166', label: 'Honeydew' },
   },
 
   /* ---- Units: stats + costs + counter class ----------------------------
@@ -59,7 +61,7 @@ BW.config = {
     leafcutter: {
       class: 'siege', hp: 130, speed: 48, damage: 10, range: 16, cooldown: 1.2,
       aggro: 110, radius: 9, buildTime: 7, color: '#5f8a3a',
-      cost: { food: 70, mud: 30 }, trainedAt: 'workshop',
+      cost: { food: 70, mud: 20, honeydew: 25 }, trainedAt: 'workshop',   // honeydew = the premium siege resource
     },
   },
 
@@ -104,9 +106,11 @@ BW.config = {
      does not cheat. grace = seconds of peace before it can attack.
      -------------------------------------------------------------------- */
   difficulties: {
-    easy:   { workerTarget: 6,  armyThreshold: 6,  buildDelay: 22, thinkEvery: 1.4, ecoMult: 1.0,  grace: 75 },
-    normal: { workerTarget: 10, armyThreshold: 9,  buildDelay: 14, thinkEvery: 1.0, ecoMult: 1.0,  grace: 60 },
-    hard:   { workerTarget: 14, armyThreshold: 12, buildDelay: 8,  thinkEvery: 0.8, ecoMult: 1.15, grace: 45 },
+    // grace = seconds before it can attack. Easy is deliberately a slow, small,
+    // late opponent so a new player has lots of room to learn.
+    easy:   { workerTarget: 8,  armyThreshold: 5,  thinkEvery: 1.6, ecoMult: 1.0,  grace: 105 },
+    normal: { workerTarget: 12, armyThreshold: 8,  thinkEvery: 1.1, ecoMult: 1.0,  grace: 70  },
+    hard:   { workerTarget: 16, armyThreshold: 11, thinkEvery: 0.8, ecoMult: 1.12, grace: 48  },
   },
 
   /* ---- Look & feel ----------------------------------------------------- */

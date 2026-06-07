@@ -44,11 +44,13 @@ window.BW = window.BW || {};
   }
 
   function createNode(resource, x, y) {
-    return { id: nextId(), kind: 'node', resource, x, y, amount: cfg.resources[resource].amount };
+    const max = cfg.resources[resource].amount;
+    return { id: nextId(), kind: 'node', resource, x, y, amount: max, max };
   }
 
-  function initWorld(difficulty) {
+  function initWorld(difficulty, opts) {
     const W = cfg.world.width, H = cfg.world.height;
+    const playerAI = !!(opts && opts.playerAI);   // AI-vs-AI watch / test mode
 
     const state = {
       units: [], buildings: [], nodes: [], obstacles: [],
@@ -60,12 +62,15 @@ window.BW = window.BW || {};
       phase: 'playing',               // 'menu' | 'playing' | 'won' | 'lost'
       paused: false,
       difficulty: difficulty || 'normal',
+      // who drives each colony — 'human' or 'ai'
+      controllers: { player: playerAI ? 'ai' : 'human', enemy: 'ai' },
+      watchMode: playerAI,
+      aiThink: { player: 0, enemy: 0 },
       drag: null,                     // box-select rectangle
       placing: null,                  // { kind } while in build-placement mode
       placeXY: null,                  // ghost position
       pings: [], alerts: [],
       time: 0,
-      ai: { think: 0, attacked: false },
     };
 
     const playerNest = createBuilding('nest', 'player', 170, H - 150);
@@ -125,7 +130,7 @@ window.BW = window.BW || {};
       }
     }
     s.buildings = s.buildings.filter(b => b.hp > 0);
-    s.nodes = s.nodes.filter(n => n.amount > 0);
+    // nodes are NOT deleted — they regenerate (see systems.update)
 
     for (const id of [...s.selected]) {
       if (!s.units.some(u => u.id === id)) s.selected.delete(id);

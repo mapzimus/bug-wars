@@ -31,14 +31,15 @@ window.BW = window.BW || {};
 
   BW.togglePause = function () { if (BW.state.phase === 'playing') BW.state.paused = !BW.state.paused; };
 
-  BW.startGame = function (difficulty) {
-    BW.world.initWorld(difficulty || 'normal');
+  BW.startGame = function (difficulty, opts) {
+    BW.world.initWorld(difficulty || 'normal', opts);
     BW.state.phase = 'playing';
     if (BW.ui) BW.ui.resetTutorial();
   };
-  BW.restart = function () {                       // replay same difficulty
+  BW.restart = function () {                       // replay same difficulty + mode
     const d = (BW.state && BW.state.difficulty) || 'normal';
-    BW.world.initWorld(d); BW.state.phase = 'playing';
+    const watch = !!(BW.state && BW.state.watchMode);
+    BW.world.initWorld(d, { playerAI: watch }); BW.state.phase = 'playing';
     if (BW.ui) BW.ui.resetTutorial();
   };
   BW.toMenu = function () {                         // back to the start screen

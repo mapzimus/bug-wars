@@ -95,6 +95,15 @@ body{
   font-size:13.5px;color:var(--text);line-height:1.5;}
 .how b{color:var(--accent);}
 .c-food{color:var(--food);} .c-mud{color:#cdae86;} .c-honey{color:var(--honey);}
+.watchrow{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:14px;flex-wrap:wrap;}
+.watch-label{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);}
+.watchbtn{font-size:13px;color:var(--accent-2);border-color:rgba(165,180,252,.3);background:rgba(165,180,252,.08);}
+.watchbtn:hover{background:rgba(165,180,252,.18);}
+.spectate-badge{position:absolute;top:16px;left:50%;transform:translate(-50%,-12px);
+  background:rgba(165,180,252,.14);color:var(--accent-2);border:1px solid rgba(165,180,252,.45);
+  font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;padding:7px 16px;border-radius:999px;
+  opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;backdrop-filter:blur(6px);z-index:5;}
+.spectate-badge.show{opacity:1;transform:translate(-50%,0);}
 
 /* ---- build + train panel ---- */
 .panel{flex:0 0 auto;border-top:1px solid var(--border);
