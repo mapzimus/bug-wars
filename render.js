@@ -51,10 +51,24 @@ window.BW = window.BW || {};
 
   /* ---- nodes / rocks --------------------------------------------------- */
   function drawNode(ctx, n) {
-    const def = cfg.resources[n.resource], r = def.radius, k = Math.max(0.45, n.amount / def.amount);
+    const def = cfg.resources[n.resource], r = def.radius, max = n.max || def.amount;
+    const frac = Math.max(0, Math.min(1, n.amount / max)), k = Math.max(0.45, frac);
+    // depletion ring (how much is left)
+    ctx.strokeStyle = 'rgba(0,0,0,0.30)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(n.x, n.y, r + 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = def.color; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(n.x, n.y, r + 5, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
+    ctx.lineCap = 'butt';
+    // the pile (shrinks as it depletes)
     ctx.fillStyle = def.color;
     for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; fillEllipse(ctx, n.x + Math.cos(a) * r * 0.5, n.y + Math.sin(a) * r * 0.5, r * 0.45 * k + 1, r * 0.4 * k + 1); }
     ctx.fillStyle = shade(def.color, -45); fillEllipse(ctx, n.x, n.y, r * 0.4 * k + 1, r * 0.36 * k + 1);
+    // remaining value
+    ctx.font = '600 11px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const label = Math.ceil(n.amount);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(label, n.x, n.y - r - 11);
+    ctx.fillStyle = '#fff'; ctx.fillText(label, n.x, n.y - r - 12);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   }
   function drawRock(ctx, o) {
     ctx.fillStyle = shade(C.obstacle, -18); fillEllipse(ctx, o.x, o.y + o.r * 0.18, o.r, o.r * 0.85);
@@ -94,6 +108,23 @@ window.BW = window.BW || {};
       ctx.fillStyle = bs.color; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, true);
       ctx.strokeStyle = tint; ctx.lineWidth = 2.5; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, false);
       drawGlyph(ctx, b, r);
+    }
+    // training progress ring + queue badge (the unit-creation countdown)
+    if (b.trainQueue && b.trainQueue.length) {
+      const total = cfg.UNIT_STATS[b.trainQueue[0]].buildTime;
+      const prog = Math.max(0, Math.min(1, 1 - b.trainTimer / total));
+      const rr = r + 9;
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(b.x, b.y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = tint; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(b.x, b.y, rr, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2); ctx.stroke();
+      ctx.lineCap = 'butt';
+      if (b.trainQueue.length > 1) {
+        const bx = b.x + rr * 0.72, by = b.y - rr * 0.72;
+        ctx.fillStyle = tint; ctx.beginPath(); ctx.arc(bx, by, 7.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#0a0e17'; ctx.font = '700 11px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(b.trainQueue.length, bx, by); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      }
     }
     if (b.hp < b.maxHp) bar(ctx, b.x, b.y - r * (b.kind === 'nest' ? 1 : 0.85) - 12, r * 2, 6, b.hp / b.maxHp);
   }
@@ -157,6 +188,17 @@ window.BW = window.BW || {};
     if ($('popCount'))      $('popCount').textContent = pop + '/' + cfg.popCap;
     if ($('selCount'))      $('selCount').textContent = s.selected.size;
     if ($('clock')) { const t = Math.floor(s.time); $('clock').textContent = (t / 60 | 0) + ':' + String(t % 60).padStart(2, '0'); }
+
+    const selEl = $('selSummary');
+    if (selEl) {
+      if (!s.selected.size) selEl.textContent = 'drag a box to select · double-click a unit for all of its type';
+      else {
+        const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter' };
+        const counts = {};
+        for (const id of s.selected) { const u = BW.byId(id); if (u) counts[u.kind] = (counts[u.kind] || 0) + 1; }
+        selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + names[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ');
+      }
+    }
 
     document.querySelectorAll('.trainbtn').forEach(btn => {
       const k = btn.dataset.train, st = cfg.UNIT_STATS[k];

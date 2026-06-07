@@ -118,7 +118,10 @@ window.BW = window.BW || {};
 
     if (BW.state.controllers[opp(team)] === 'human') {   // telegraph to a human defender
       const warn = BW.state.alerts.some(al => al.type === 'incoming' && al.until > BW.state.time);
-      if (!warn) BW.state.alerts.push({ type: 'incoming', until: BW.state.time + 6, x: target.x, y: target.y });
+      if (!warn) {
+        BW.state.alerts.push({ type: 'incoming', until: BW.state.time + 6, x: target.x, y: target.y });
+        if (BW.sound) BW.sound.play('alert');
+      }
     }
   }
 

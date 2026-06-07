@@ -23,6 +23,7 @@ window.BW = window.BW || {};
       done: () => false },   // final tip stays for the match
   ];
   let stepIdx = 0;
+  let lastPhase = 'menu';
 
   function tick() {
     const s = BW.state;
@@ -30,6 +31,15 @@ window.BW = window.BW || {};
 
     const sb = $('spectateBadge');
     if (sb) sb.classList.toggle('show', !!s.watchMode && s.phase === 'playing');
+
+    const sp = $('selPanel');                 // selection bar only while you're playing
+    if (sp) sp.style.display = (s.phase === 'playing' && !s.watchMode) ? '' : 'none';
+
+    if (s.phase !== lastPhase) {              // victory / defeat sting
+      if (BW.sound && s.phase === 'won') BW.sound.play('win');
+      else if (BW.sound && s.phase === 'lost') BW.sound.play('lose');
+      lastPhase = s.phase;
+    }
 
     const wb = $('warnBanner');
     if (wb) wb.classList.toggle('show', !s.watchMode && s.phase === 'playing' && s.alerts.some(a => a.type === 'incoming' && a.until > s.time));

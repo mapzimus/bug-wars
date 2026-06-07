@@ -37,6 +37,17 @@
     <div id="spectateBadge" class="spectate-badge">👁 SPECTATING · AI vs AI · press R to restart</div>
     <div id="toast" class="toast"></div>
 
+    <!-- Selection bar: select-by-type + live summary -->
+    <div id="selPanel" class="sel-panel">
+      <div class="sel-row">
+        <span class="sel-label">Select</span>
+        <button class="selbtn" data-select="all" title="Select all units">All</button>
+        <button class="selbtn" data-select="workers" title="All workers (Q)">Workers</button>
+        <button class="selbtn" data-select="army" title="All fighters (E)">Army</button>
+      </div>
+      <div id="selSummary" class="sel-summary">drag a box to select · double-click a unit for all of its type</div>
+    </div>
+
     <!-- Tutorial coaching card -->
     <div id="tutorial" class="tutorial">
       <button id="tutorialClose" class="tut-x" title="Hide">×</button>
@@ -109,6 +120,7 @@
   <script src="input.js"></script>
   <script src="render.js"></script>
   <script src="ui.js"></script>
+  <script src="sound.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

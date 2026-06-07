@@ -125,5 +125,8 @@ BW.config = {
   /* ---- Misc ------------------------------------------------------------ */
   separationRadius: 18,
   rallyOffset: 64,
-  guardRange: 300,          // idle fighters defend enemies within this of their nest
+  guardRange: 300,           // idle fighters defend enemies within this of their nest
+  emergencyWorkerTime: 16,   // 0 workers? the nest hatches a FREE one this often (anti-softlock)
+  guardRadius: 95,           // idle soldiers hold a defensive ring this far from their nest
+  guardHomeRange: 280,       // ...but only auto-return to guard when within this of the nest
 };

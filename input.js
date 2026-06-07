@@ -46,6 +46,18 @@ window.BW = window.BW || {};
 
   function addPing(x, y, type) { BW.state.pings.push({ x, y, type, t: BW.state.time }); }
 
+  // ---- select by type (buttons + double-click) ----
+  function selectWhere(pred) {
+    BW.state.selected = new Set(BW.state.units.filter(u => u.team === 'player' && pred(u)).map(u => u.id));
+    if (BW.sound) BW.sound.play('select');
+  }
+  BW.select = {
+    all:     () => selectWhere(() => true),
+    workers: () => selectWhere(u => u.kind === 'worker'),
+    army:    () => selectWhere(u => u.kind !== 'worker'),
+  };
+  let lastClick = null;   // {t, kind, x, y} for double-click detection
+
   let toastTimer = null;
   function toast(msg) {
     const el = document.getElementById('toast'); if (!el) return;
@@ -63,7 +75,7 @@ window.BW = window.BW || {};
     const p = worldPos(e);
     if (BW.state.placing) {                       // place a building
       const res = BW.tryBuild(BW.state.placing.kind, 'player', p.x, p.y);
-      if (res.ok) { addPing(p.x, p.y, 'build'); if (!e.shiftKey) BW.state.placing = null; }
+      if (res.ok) { addPing(p.x, p.y, 'build'); if (BW.sound) BW.sound.play('build'); if (!e.shiftKey) BW.state.placing = null; }
       else toast(res.reason);
       return;
     }
@@ -82,8 +94,14 @@ window.BW = window.BW || {};
     if (dragging) s.selected = new Set(unitsInBox(s.units, dragStart.x, dragStart.y, p.x, p.y, 'player'));
     else {
       const u = playerUnitAt(p);
-      if (u) { e.shiftKey ? s.selected.add(u.id) : (s.selected = new Set([u.id])); }
-      else if (!e.shiftKey) s.selected.clear();
+      if (u) {
+        const now = performance.now();
+        const dbl = lastClick && now - lastClick.t < 320 && lastClick.kind === u.kind && Math.hypot(p.x - lastClick.x, p.y - lastClick.y) < 24;
+        if (dbl) selectWhere(uu => uu.kind === u.kind);              // double-click → all of this type
+        else if (e.shiftKey) s.selected.add(u.id);
+        else s.selected = new Set([u.id]);
+        lastClick = { t: now, kind: u.kind, x: p.x, y: p.y };
+      } else if (!e.shiftKey) s.selected.clear();
     }
     dragStart = null; dragging = false; s.drag = null;
   }
@@ -108,7 +126,9 @@ window.BW = window.BW || {};
       else                                      u.order = { type: 'attackMove', tx, ty, targetId: null };
       i++;
     }
-    addPing(p.x, p.y, enemy ? 'attack' : node ? 'gather' : 'move');
+    const fx = enemy ? 'attack' : node ? 'gather' : 'move';
+    addPing(p.x, p.y, fx);
+    if (BW.sound) BW.sound.play(fx);
   }
 
   /* ---- panels & keys --------------------------------------------------- */
@@ -122,6 +142,8 @@ window.BW = window.BW || {};
   const HOT = { '1': 'worker', '2': 'soldier', '3': 'fireant', '4': 'leafcutter' };
   function onKeyDown(e) {
     if (HOT[e.key]) return train(HOT[e.key]);
+    if (e.key === 'q' || e.key === 'Q') return BW.select.workers();
+    if (e.key === 'e' || e.key === 'E') return BW.select.army();
     if (e.key === 'p' || e.key === 'P') BW.togglePause();
     if (e.key === 'r' || e.key === 'R') BW.restart();
     if (e.key === 'Escape') { if (BW.state.placing) BW.state.placing = null; else BW.state.selected.clear(); }
@@ -135,6 +157,7 @@ window.BW = window.BW || {};
     window.addEventListener('keydown', onKeyDown);
     document.querySelectorAll('.trainbtn').forEach(b => b.addEventListener('click', () => train(b.dataset.train)));
     document.querySelectorAll('.buildbtn').forEach(b => b.addEventListener('click', () => build(b.dataset.build)));
+    document.querySelectorAll('[data-select]').forEach(b => b.addEventListener('click', () => BW.select[b.dataset.select] && BW.select[b.dataset.select]()));
     document.querySelectorAll('[data-action="restart"]').forEach(b => b.addEventListener('click', () => BW.restart()));
     const pause = document.getElementById('pauseBtn');
     if (pause) pause.addEventListener('click', () => BW.togglePause());

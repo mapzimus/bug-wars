@@ -239,10 +239,26 @@ window.BW = window.BW || {};
         break;
       case 'idle':
       default: {
-        // NO auto-gather: workers wait for your orders. Fighters auto-defend.
-        if (u.kind !== 'worker' && stats.aggro > 0) {
+        const isHuman = BW.state.controllers[u.team] === 'human';
+        if (u.kind === 'worker') {
+          // Human workers auto-gather the nearest resource by default (you can
+          // still drag-select and redirect them anytime). AI workers stay idle
+          // for the AI controller to assign by resource ratio.
+          if (isHuman) {
+            const node = nearestNode(u);
+            if (node) { u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id }; break; }
+          }
+        } else if (stats.aggro > 0) {
           const t = acquireTarget(u) || nestThreat(u);
-          if (t) { pursueAndStrike(u, t, dt); break; }
+          if (t) { pursueAndStrike(u, t, dt); break; }           // engage a threat first
+          if (isHuman) {                                          // otherwise hold a guard ring at home
+            const nest = nearestOwn(u.team, b => b.kind === 'nest');
+            if (nest && dist(u, nest) <= cfg.guardHomeRange) {
+              const a = u.id * 2.39996;                           // golden angle → soldiers fan around the ring
+              const gx = nest.x + Math.cos(a) * cfg.guardRadius, gy = nest.y + Math.sin(a) * cfg.guardRadius;
+              if (Math.hypot(u.x - gx, u.y - gy) > 10) { moveToward(u, gx, gy, dt); break; }
+            }
+          }
         }
         const [sx, sy] = separationVec(u);
         let nx = u.x + sx * dt, ny = u.y + sy * dt;
@@ -256,12 +272,27 @@ window.BW = window.BW || {};
     const s = cfg.BUILDING_STATS[b.kind];
     if (b.attackCooldown > 0) b.attackCooldown -= dt;
 
+    // Anti-softlock: a nest with NO living workers slowly hatches a FREE one,
+    // so losing your whole worker line is recoverable, not game over.
+    if (b.kind === 'nest') {
+      const hasWorker = BW.state.units.some(u => u.team === b.team && u.kind === 'worker');
+      if (hasWorker) b.emergencyTimer = cfg.emergencyWorkerTime;
+      else {
+        b.emergencyTimer = (b.emergencyTimer == null ? cfg.emergencyWorkerTime : b.emergencyTimer) - dt;
+        if (b.emergencyTimer <= 0) {
+          BW.state.units.push(BW.world.createUnit('worker', b.team, b.rallyX, b.rallyY));
+          b.emergencyTimer = cfg.emergencyWorkerTime;
+        }
+      }
+    }
+
     if (s.trains && b.trainQueue.length) {            // production
       if (b.trainTimer <= 0) b.trainTimer = cfg.UNIT_STATS[b.trainQueue[0]].buildTime;
       b.trainTimer -= dt;
       if (b.trainTimer <= 0) {
         const kind = b.trainQueue.shift();
         BW.state.units.push(BW.world.createUnit(kind, b.team, b.rallyX, b.rallyY));
+        if (BW.sound && BW.state.controllers[b.team] === 'human') BW.sound.play('train');
         b.trainTimer = b.trainQueue.length ? cfg.UNIT_STATS[b.trainQueue[0]].buildTime : 0;
       }
     }
