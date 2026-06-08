@@ -236,7 +236,8 @@ window.BW = window.BW || {};
     if (selEl) {
       if (!s.selected.size) selEl.textContent = 'drag a box to select · double-click a unit for all of its type';
       else {
-        const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter' };
+        const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
+                        drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet' };
         const counts = {};
         for (const id of s.selected) { const u = BW.byId(id); if (u) counts[u.kind] = (counts[u.kind] || 0) + 1; }
         selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + names[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ');
