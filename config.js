@@ -63,6 +63,34 @@ BW.config = {
       aggro: 110, radius: 9, buildTime: 7, color: '#5f8a3a',
       cost: { food: 70, mud: 20, honeydew: 25 }, trainedAt: 'workshop',   // honeydew = the premium siege resource
     },
+
+    // ---- Bees (faction #2): mirror the ant roles, plus a FLYER (hornet) ----
+    drone: {
+      class: 'worker', hp: 46, speed: 84, damage: 4, range: 12, cooldown: 0.9,
+      aggro: 0, radius: 6, buildTime: 4, color: '#e6c34d',
+      cost: { food: 50 }, trainedAt: 'hive',
+    },
+    guard: {
+      class: 'infantry', hp: 150, speed: 64, damage: 12, range: 15, cooldown: 1.0,
+      aggro: 150, radius: 9, buildTime: 6, color: '#c79a2c',
+      cost: { food: 70, mud: 10 }, trainedAt: 'brood',
+    },
+    striker: {
+      class: 'skirmisher', hp: 66, speed: 122, damage: 8, range: 13, cooldown: 0.55,
+      aggro: 170, radius: 7, buildTime: 5, color: '#e08a1e',
+      cost: { food: 60, mud: 5 }, trainedAt: 'brood',
+      venom: { dps: 9, duration: 3 },
+    },
+    carpenter: {
+      class: 'siege', hp: 122, speed: 48, damage: 10, range: 16, cooldown: 1.2,
+      aggro: 110, radius: 9, buildTime: 7, color: '#9a7326',
+      cost: { food: 70, mud: 20, honeydew: 25 }, trainedAt: 'apiary',
+    },
+    hornet: {
+      class: 'flyer', flying: true, hp: 95, speed: 128, damage: 11, range: 14, cooldown: 0.8,
+      aggro: 165, radius: 8, buildTime: 7, color: '#d99520',
+      cost: { food: 80, honeydew: 20 }, trainedAt: 'apiary',
+    },
   },
 
   /* ---- Buildings: the GDD's five categories ---------------------------
@@ -79,12 +107,39 @@ BW.config = {
     granary:  { category: 'storage',    hp: 450,  radius: 20, cost: { mud: 70 },                                       drop: true,  color: '#8a7a4a' },
     tower:    { category: 'defense',    hp: 800,  radius: 18, cost: { mud: 140 },     damage: 16, range: 130, cooldown: 1.0, aggro: 150, color: '#6b6b78' },
     wall:     { category: 'defense',    hp: 650,  radius: 15, cost: { mud: 25 },      blocks: true,                                color: '#7d7d88' },
+    // ---- Bee buildings (faction #2). granary/tower/wall above are shared. ----
+    hive:     { category: 'nest',       hp: 1600, radius: 34, cost: {},               trains: ['drone'],               drop: true,  color: '#7a5c1f' },
+    brood:    { category: 'production', hp: 700,  radius: 24, cost: { mud: 120 },     trains: ['guard', 'striker'],                color: '#8a6a22' },
+    apiary:   { category: 'production', hp: 700,  radius: 24, cost: { mud: 160 },     trains: ['carpenter', 'hornet'],             color: '#9a7520' },
   },
 
   // Build menu order (which building buttons appear).
   BUILD_MENU: ['barracks', 'workshop', 'granary', 'tower', 'wall'],
   // Train menu order.
   TRAIN_MENU: ['worker', 'soldier', 'fireant', 'leafcutter'],
+
+  /* ---- Factions -------------------------------------------------------
+     Each side belongs to a faction. The faction maps generic ROLES to its
+     own unit/building kinds, so the engine, AI and UI stay faction-agnostic.
+     -------------------------------------------------------------------- */
+  FACTIONS: {
+    ants: {
+      name: 'Ants', emoji: '🐜', base: 'nest', gatherer: 'worker',
+      producers: ['barracks', 'workshop'],
+      buildMenu: ['barracks', 'workshop', 'granary', 'tower', 'wall'],
+      trainMenu: ['worker', 'soldier', 'fireant', 'leafcutter'],
+      aiBuildOrder: ['barracks', 'workshop', 'tower'],
+      army: { frontline: 'soldier', skirmisher: 'fireant', siege: 'leafcutter', flyer: null },
+    },
+    bees: {
+      name: 'Bees', emoji: '🐝', base: 'hive', gatherer: 'drone',
+      producers: ['brood', 'apiary'],
+      buildMenu: ['brood', 'apiary', 'granary', 'tower', 'wall'],
+      trainMenu: ['drone', 'guard', 'striker', 'carpenter', 'hornet'],
+      aiBuildOrder: ['brood', 'apiary', 'tower'],
+      army: { frontline: 'guard', skirmisher: 'striker', siege: 'carpenter', flyer: 'hornet' },
+    },
+  },
 
   /* ---- Counters (rock-paper-scissors) ---------------------------------
      LEARNING SPOT: attackerClass → { targetClass: damageMultiplier }.
@@ -95,9 +150,10 @@ BW.config = {
      -------------------------------------------------------------------- */
   COUNTERS: {
     infantry:   { skirmisher: 1.6 },
-    skirmisher: { siege: 1.6 },
+    skirmisher: { siege: 1.6, flyer: 1.6 },    // skirmishers are the anti-air
     siege:      { building: 4.0, infantry: 1.2 },
-    building:   {},     // towers have no bonus damage
+    flyer:      { siege: 1.6, worker: 1.4 },    // air harasses slow siege + raids gatherers
+    building:   {},     // towers have no bonus damage (but DO hit flyers)
     worker:     {},
   },
 

@@ -51,6 +51,10 @@ window.BW = window.BW || {};
   function initWorld(difficulty, opts) {
     const W = cfg.world.width, H = cfg.world.height;
     const playerAI = !!(opts && opts.playerAI);   // AI-vs-AI watch / test mode
+    // factions: player picks one; the enemy gets the opposite (always a cross-faction match)
+    const pFac = (opts && opts.faction) || 'ants';
+    const eFac = (opts && opts.enemyFaction) || (pFac === 'ants' ? 'bees' : 'ants');
+    const FP = cfg.FACTIONS[pFac], FE = cfg.FACTIONS[eFac];
 
     const state = {
       units: [], buildings: [], nodes: [], obstacles: [],
@@ -64,6 +68,7 @@ window.BW = window.BW || {};
       difficulty: difficulty || 'normal',
       // who drives each colony — 'human' or 'ai'
       controllers: { player: playerAI ? 'ai' : 'human', enemy: 'ai' },
+      faction: { player: pFac, enemy: eFac },
       watchMode: playerAI,
       aiThink: { player: 0, enemy: 0 },
       drag: null,                     // box-select rectangle
@@ -73,19 +78,19 @@ window.BW = window.BW || {};
       time: 0,
     };
 
-    const playerNest = createBuilding('nest', 'player', 170, H - 150);
-    const enemyNest  = createBuilding('nest', 'enemy',  W - 170, 150);
+    const playerNest = createBuilding(FP.base, 'player', 170, H - 150);
+    const enemyNest  = createBuilding(FE.base, 'enemy',  W - 170, 150);
     state.buildings.push(playerNest, enemyNest);
 
-    // Starting workers for BOTH sides (the AI runs a real economy too).
-    const ring = (nest, team) => {
+    // Starting gatherers for BOTH sides (the AI runs a real economy too).
+    const ring = (nest, team, gatherer) => {
       for (let i = 0; i < cfg.startingWorkers; i++) {
         const a = (i / cfg.startingWorkers) * Math.PI * 2;
-        state.units.push(createUnit('worker', team, nest.x + Math.cos(a) * 48, nest.y + Math.sin(a) * 48));
+        state.units.push(createUnit(gatherer, team, nest.x + Math.cos(a) * 48, nest.y + Math.sin(a) * 48));
       }
     };
-    ring(playerNest, 'player');
-    ring(enemyNest, 'enemy');
+    ring(playerNest, 'player', FP.gatherer);
+    ring(enemyNest, 'enemy', FE.gatherer);
 
     // Resource layout: FOOD near each base, MUD in the mid-lanes,
     // HONEYDEW scarce and contested in the center.
@@ -124,7 +129,7 @@ window.BW = window.BW || {};
     s.units = s.units.filter(u => u.hp > 0);
 
     for (const b of s.buildings) {
-      if (b.hp <= 0 && b.kind === 'nest') {
+      if (b.hp <= 0 && cfg.BUILDING_STATS[b.kind].category === 'nest') {   // nest OR hive
         if (b.team === 'player') s.phase = 'lost';
         if (b.team === 'enemy')  s.phase = 'won';
       }

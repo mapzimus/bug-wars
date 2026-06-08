@@ -34,13 +34,14 @@ window.BW = window.BW || {};
   BW.startGame = function (difficulty, opts) {
     BW.world.initWorld(difficulty || 'normal', opts);
     BW.state.phase = 'playing';
-    if (BW.ui) BW.ui.resetTutorial();
+    if (BW.ui) { BW.ui.buildPanel(BW.state.faction.player); BW.ui.resetTutorial(); }
   };
-  BW.restart = function () {                       // replay same difficulty + mode
+  BW.restart = function () {                       // replay same difficulty + faction + mode
     const d = (BW.state && BW.state.difficulty) || 'normal';
     const watch = !!(BW.state && BW.state.watchMode);
-    BW.world.initWorld(d, { playerAI: watch }); BW.state.phase = 'playing';
-    if (BW.ui) BW.ui.resetTutorial();
+    const faction = (BW.state && BW.state.faction) ? BW.state.faction.player : 'ants';
+    BW.world.initWorld(d, { playerAI: watch, faction }); BW.state.phase = 'playing';
+    if (BW.ui) { BW.ui.buildPanel(faction); BW.ui.resetTutorial(); }
   };
   BW.toMenu = function () {                         // back to the start screen
     const d = (BW.state && BW.state.difficulty) || 'normal';

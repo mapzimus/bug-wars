@@ -77,10 +77,19 @@ window.BW = window.BW || {};
   }
 
   /* ---- buildings ------------------------------------------------------- */
+  function hexAt(ctx, cx, cy, rad) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + Math.PI / 6, px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    ctx.closePath();
+  }
   function drawNestMound(ctx, b, tint, r) {
-    const base = b.team === 'player' ? '#6b4a2f' : '#6b3030';
+    const base = cfg.BUILDING_STATS[b.kind].color;     // ant nest brown, bee hive amber
     for (let i = 0; i < 4; i++) { ctx.fillStyle = shade(base, i * 9); ctx.beginPath(); ctx.arc(b.x, b.y, r * (1 - i * 0.18), 0, Math.PI * 2); ctx.fill(); }
     ctx.fillStyle = '#1b120b'; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.22, 0, Math.PI * 2); ctx.fill();
+    if (b.kind === 'hive') {                            // honeycomb cells
+      ctx.strokeStyle = 'rgba(40,28,8,0.55)'; ctx.lineWidth = 1.5;
+      for (const [hx, hy] of [[-0.45, -0.38], [0.45, -0.38], [0, 0.52], [-0.55, 0.3], [0.55, 0.3]]) { hexAt(ctx, b.x + hx * r, b.y + hy * r, r * 0.2); ctx.stroke(); }
+    }
     ring(ctx, b.x, b.y, r + 3, tint, 3);
   }
   function drawGlyph(ctx, b, r) {
@@ -99,11 +108,17 @@ window.BW = window.BW || {};
     } else if (b.kind === 'wall') {              // bricks
       ctx.beginPath(); ctx.moveTo(b.x - r * 0.6, b.y); ctx.lineTo(b.x + r * 0.6, b.y);
       ctx.moveTo(b.x, b.y - r * 0.5); ctx.lineTo(b.x, b.y + r * 0.5); ctx.stroke();
+    } else if (b.kind === 'brood') {             // honeycomb cell
+      hexAt(ctx, b.x, b.y, r * 0.5); ctx.stroke();
+    } else if (b.kind === 'apiary') {            // honeycomb + core (siege/hornet hub)
+      hexAt(ctx, b.x, b.y, r * 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.16, 0, Math.PI * 2); ctx.fill();
     }
   }
   function drawBuilding(ctx, b) {
     const bs = cfg.BUILDING_STATS[b.kind], r = bs.radius, tint = tintOf(b.team);
-    if (b.kind === 'nest') drawNestMound(ctx, b, tint, r);
+    const isBase = bs.category === 'nest';
+    if (isBase) drawNestMound(ctx, b, tint, r);
     else {
       ctx.fillStyle = bs.color; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, true);
       ctx.strokeStyle = tint; ctx.lineWidth = 2.5; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, false);
@@ -126,22 +141,50 @@ window.BW = window.BW || {};
         ctx.fillText(b.trainQueue.length, bx, by); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       }
     }
-    if (b.hp < b.maxHp) bar(ctx, b.x, b.y - r * (b.kind === 'nest' ? 1 : 0.85) - 12, r * 2, 6, b.hp / b.maxHp);
+    if (b.hp < b.maxHp) bar(ctx, b.x, b.y - r * (isBase ? 1 : 0.85) - 12, r * 2, 6, b.hp / b.maxHp);
   }
 
   /* ---- ants ------------------------------------------------------------ */
   function drawAnt(ctx, u, time) {
     const s = cfg.UNIT_STATS[u.kind], r = s.radius * 1.2, tint = tintOf(u.team);
-    ctx.save(); ctx.translate(u.x, u.y); ctx.rotate(u.heading);
-    ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.16); ctx.lineCap = 'round';
-    const ph = time * 9 + u.id * 1.7;
-    for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
-      const lx = (-0.15 + i * 0.42) * r, sw = Math.sin(ph + i) * 0.18 * side;
-      ctx.beginPath(); ctx.moveTo(lx, side * r * 0.22); ctx.quadraticCurveTo(lx + 0.25 * r, side * r * 0.95, lx + (0.2 + sw) * r * 1.6, side * r * 1.15); ctx.stroke();
+    const bee = BW.state.faction && BW.state.faction[u.team] === 'bees';
+    const flying = s.flying;
+
+    if (flying) { ctx.fillStyle = 'rgba(0,0,0,0.20)'; fillEllipse(ctx, u.x, u.y + r * 1.2, r * 0.9, r * 0.38); }   // ground shadow
+
+    ctx.save();
+    ctx.translate(u.x, u.y - (flying ? r * 1.0 : 0));     // elevate flyers
+    ctx.rotate(u.heading);
+
+    if (!flying) {                                        // walking legs
+      ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.16); ctx.lineCap = 'round';
+      const ph = time * 9 + u.id * 1.7;
+      for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
+        const lx = (-0.15 + i * 0.42) * r, sw = Math.sin(ph + i) * 0.18 * side;
+        ctx.beginPath(); ctx.moveTo(lx, side * r * 0.22); ctx.quadraticCurveTo(lx + 0.25 * r, side * r * 0.95, lx + (0.2 + sw) * r * 1.6, side * r * 1.15); ctx.stroke();
+      }
     }
-    ctx.beginPath(); ctx.moveTo(r * 0.95, -r * 0.18); ctx.lineTo(r * 1.75, -r * 0.55); ctx.moveTo(r * 0.95, r * 0.18); ctx.lineTo(r * 1.75, r * 0.55); ctx.stroke();
+    if (bee) {                                            // beating wings
+      const wf = Math.sin(time * (flying ? 38 : 20) + u.id) * 0.35;
+      ctx.fillStyle = 'rgba(225,238,255,0.45)'; ctx.strokeStyle = 'rgba(200,222,255,0.65)'; ctx.lineWidth = 1;
+      for (const side of [-1, 1]) {
+        ctx.save(); ctx.translate(0, side * 0.32 * r); ctx.rotate(side * (0.55 + wf));
+        ctx.beginPath(); ctx.ellipse(-0.35 * r, 0, 0.62 * r, 0.26 * r, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      }
+    }
+    // antennae
+    ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.14); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(r * 0.95, -r * 0.18); ctx.lineTo(r * 1.6, -r * 0.5); ctx.moveTo(r * 0.95, r * 0.18); ctx.lineTo(r * 1.6, r * 0.5); ctx.stroke();
+    // body
     ctx.fillStyle = s.color;
     fillEllipse(ctx, -0.72 * r, 0, 0.8 * r, 0.6 * r); fillEllipse(ctx, 0.05 * r, 0, 0.46 * r, 0.42 * r); fillEllipse(ctx, 0.78 * r, 0, 0.5 * r, 0.46 * r);
+    if (bee) {                                            // black stripes on the abdomen
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(-0.72 * r, 0, 0.8 * r, 0.6 * r, 0, 0, Math.PI * 2); ctx.clip();
+      ctx.fillStyle = 'rgba(26,18,6,0.9)';
+      for (const dx of [-1.05, -0.7, -0.35]) fillEllipse(ctx, dx * r, 0, 0.1 * r, 0.7 * r);
+      ctx.restore();
+    }
     if (u.venomTimer > 0) { ctx.fillStyle = 'rgba(124,255,107,0.35)'; fillEllipse(ctx, -0.72 * r, 0, 0.88 * r, 0.66 * r); }
     ctx.strokeStyle = tint; ctx.lineWidth = Math.max(1.4, r * 0.24); ctx.beginPath(); ctx.ellipse(0.05 * r, 0, 0.5 * r, 0.46 * r, 0, 0, Math.PI * 2); ctx.stroke();
     if (u.carrying > 0 && u.carryType) { ctx.fillStyle = cfg.resources[u.carryType].color; fillEllipse(ctx, -1.3 * r, 0, r * 0.34, r * 0.34); }

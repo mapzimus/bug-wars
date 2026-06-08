@@ -62,8 +62,14 @@
         <p class="menu-sub">A backyard real-time strategy game. Out-economy, out-build, and out-fight a rival ant colony.</p>
         <div class="how">
           <div><b>Gather</b> — drag-select workers, right-click <span class="c-food">Food</span> / <span class="c-mud">Mud</span> / <span class="c-honey">Honeydew</span> to mine. They keep at it until you move them.</div>
-          <div><b>Build &amp; Train</b> — spend Mud on a Barracks/Workshop/Tower/Walls; spend Food to train ants. Counters matter: infantry &gt; skirmisher &gt; siege &gt; buildings.</div>
-          <div><b>Win</b> — destroy the enemy nest before they destroy yours. You'll get a warning when they march.</div>
+          <div><b>Build &amp; Train</b> — spend Mud on buildings, Food to train units. Counters matter: infantry &gt; skirmisher &gt; siege &gt; buildings, and skirmishers shoot down flyers.</div>
+          <div><b>Win</b> — destroy the enemy base before they destroy yours. You'll get a warning when they march.</div>
+        </div>
+        <div class="facrow">
+          <span class="fac-label">Play as</span>
+          <button class="ctrl facbtn selected" data-faction="ants">🐜 Ants</button>
+          <button class="ctrl facbtn" data-faction="bees">🐝 Bees</button>
+          <span class="fac-vs">— you'll face the other faction</span>
         </div>
         <div class="diffrow">
           <button class="ctrl big diffbtn" data-diff="easy">Easy</button>
@@ -94,21 +100,8 @@
   <!-- ===== Build + Train panel ===== -->
   <footer class="panel">
     <div class="rows">
-      <div class="panel-row">
-        <span class="row-label">Build <small>(Mud)</small></span>
-        <button class="buildbtn" data-build="barracks"><span class="bk">Barracks</span><span class="bc">🟫 120</span><span class="bd">makes soldiers / fire ants</span></button>
-        <button class="buildbtn" data-build="workshop"><span class="bk">Workshop</span><span class="bc">🟫 160</span><span class="bd">makes leafcutters (siege)</span></button>
-        <button class="buildbtn" data-build="granary"><span class="bk">Granary</span><span class="bc">🟫 70</span><span class="bd">closer drop-off</span></button>
-        <button class="buildbtn" data-build="tower"><span class="bk">Tower</span><span class="bc">🟫 140</span><span class="bd">shoots attackers</span></button>
-        <button class="buildbtn" data-build="wall"><span class="bk">Wall</span><span class="bc">🟫 25</span><span class="bd">blocks a path</span></button>
-      </div>
-      <div class="panel-row">
-        <span class="row-label">Train</span>
-        <button class="trainbtn" data-train="worker"><span class="bk">Worker</span><span class="bc">🍞 50</span><span class="bh">1</span><span class="bd">gathers resources</span></button>
-        <button class="trainbtn" data-train="soldier"><span class="bk">Soldier</span><span class="bc">🍞 70 🟫 10</span><span class="bh">2</span><span class="bd">tanky · beats skirmishers</span></button>
-        <button class="trainbtn" data-train="fireant"><span class="bk">Fire Ant</span><span class="bc">🍞 60 🟫 5</span><span class="bh">3</span><span class="bd">fast · venom · beats siege</span></button>
-        <button class="trainbtn" data-train="leafcutter"><span class="bk">Leafcutter</span><span class="bc">🍞 70 🟫 30</span><span class="bh">4</span><span class="bd">siege · wrecks buildings</span></button>
-      </div>
+      <div class="panel-row" id="buildRow"></div>   <!-- built per-faction by ui.js -->
+      <div class="panel-row" id="trainRow"></div>
     </div>
   </footer>
 

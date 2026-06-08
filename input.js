@@ -42,7 +42,7 @@ window.BW = window.BW || {};
   const playerUnitAt  = p => pick(BW.state.units.filter(u => u.team === 'player'), p, 4);
   const enemyAt       = p => pick([...BW.state.units, ...BW.state.buildings].filter(e => e.team === 'enemy'), p, 4);
   const nodeAt        = p => pick(BW.state.nodes, p, 5);
-  const ownNestAt     = p => pick(BW.state.buildings.filter(b => b.team === 'player' && b.kind === 'nest'), p, 6);
+  const ownNestAt     = p => pick(BW.state.buildings.filter(b => b.team === 'player' && BW.config.BUILDING_STATS[b.kind].category === 'nest'), p, 6);
 
   function addPing(x, y, type) { BW.state.pings.push({ x, y, type, t: BW.state.time }); }
 
@@ -51,10 +51,11 @@ window.BW = window.BW || {};
     BW.state.selected = new Set(BW.state.units.filter(u => u.team === 'player' && pred(u)).map(u => u.id));
     if (BW.sound) BW.sound.play('select');
   }
+  const gathererKind = team => BW.config.FACTIONS[BW.state.faction[team]].gatherer;
   BW.select = {
     all:     () => selectWhere(() => true),
-    workers: () => selectWhere(u => u.kind === 'worker'),
-    army:    () => selectWhere(u => u.kind !== 'worker'),
+    workers: () => selectWhere(u => u.kind === gathererKind('player')),
+    army:    () => selectWhere(u => u.kind !== gathererKind('player')),
   };
   let lastClick = null;   // {t, kind, x, y} for double-click detection
 
@@ -119,11 +120,12 @@ window.BW = window.BW || {};
       const u = BW.byId(id); if (!u) continue;
       const a = (i / n) * Math.PI * 2, spread = n > 1 ? 16 + n * 0.6 : 0;
       const tx = p.x + Math.cos(a) * spread, ty = p.y + Math.sin(a) * spread;
-      if (enemy)                                u.order = { type: 'attack', tx: enemy.x, ty: enemy.y, targetId: enemy.id };
-      else if (node && u.kind === 'worker')     u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
-      else if (home && u.kind === 'worker')     u.order = { type: 'idle',   tx: u.x, ty: u.y, targetId: null };
-      else if (u.kind === 'worker')             u.order = { type: 'move',   tx, ty, targetId: null };
-      else                                      u.order = { type: 'attackMove', tx, ty, targetId: null };
+      const isG = u.kind === gathererKind('player');
+      if (enemy)              u.order = { type: 'attack', tx: enemy.x, ty: enemy.y, targetId: enemy.id };
+      else if (node && isG)  u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
+      else if (home && isG)  u.order = { type: 'idle',   tx: u.x, ty: u.y, targetId: null };
+      else if (isG)          u.order = { type: 'move',   tx, ty, targetId: null };
+      else                   u.order = { type: 'attackMove', tx, ty, targetId: null };
       i++;
     }
     const fx = enemy ? 'attack' : node ? 'gather' : 'move';
@@ -139,9 +141,9 @@ window.BW = window.BW || {};
     BW.state.placing = (BW.state.placing && BW.state.placing.kind === kind) ? null : { kind };
   }
 
-  const HOT = { '1': 'worker', '2': 'soldier', '3': 'fireant', '4': 'leafcutter' };
   function onKeyDown(e) {
-    if (HOT[e.key]) return train(HOT[e.key]);
+    const d = parseInt(e.key, 10);                          // 1..n trains the faction's units
+    if (d >= 1 && d <= 9) { const menu = BW.config.FACTIONS[BW.state.faction.player].trainMenu; if (menu[d - 1]) return train(menu[d - 1]); }
     if (e.key === 'q' || e.key === 'Q') return BW.select.workers();
     if (e.key === 'e' || e.key === 'E') return BW.select.army();
     if (e.key === 'p' || e.key === 'P') BW.togglePause();
@@ -155,8 +157,12 @@ window.BW = window.BW || {};
     window.addEventListener('mouseup', onMouseUp);
     canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('keydown', onKeyDown);
-    document.querySelectorAll('.trainbtn').forEach(b => b.addEventListener('click', () => train(b.dataset.train)));
-    document.querySelectorAll('.buildbtn').forEach(b => b.addEventListener('click', () => build(b.dataset.build)));
+    // Delegated so dynamically-rebuilt faction panels keep working.
+    const panel = document.querySelector('.panel');
+    if (panel) panel.addEventListener('click', e => {
+      const tb = e.target.closest('.trainbtn'); if (tb) return train(tb.dataset.train);
+      const bb = e.target.closest('.buildbtn'); if (bb) return build(bb.dataset.build);
+    });
     document.querySelectorAll('[data-select]').forEach(b => b.addEventListener('click', () => BW.select[b.dataset.select] && BW.select[b.dataset.select]()));
     document.querySelectorAll('[data-action="restart"]').forEach(b => b.addEventListener('click', () => BW.restart()));
     const pause = document.getElementById('pauseBtn');

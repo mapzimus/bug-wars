@@ -13,6 +13,7 @@ window.BW = window.BW || {};
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
   const dist  = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const idle  = u => ({ type: 'idle', tx: u.x, ty: u.y, targetId: null });
+  const gathererKind = team => cfg.FACTIONS[BW.state.faction[team]].gatherer;   // 'worker' or 'drone'
 
   function entityRadius(e) {
     if (e.kind === 'node') return cfg.resources[e.resource].radius;
@@ -54,6 +55,7 @@ window.BW = window.BW || {};
   // Push a position out of rocks AND blocking walls. Two relaxation passes so a
   // unit squeezed between two blockers isn't shoved straight back into one.
   function avoidObstacles(u, nx, ny) {
+    if (cfg.UNIT_STATS[u.kind] && cfg.UNIT_STATS[u.kind].flying) return [nx, ny];  // flyers ignore rocks & walls
     const rad = entityRadius(u);
     const push = (ox, oy, orr) => {
       const dx = nx - ox, dy = ny - oy, d = Math.hypot(dx, dy) || 1, min = orr + rad;
@@ -81,8 +83,10 @@ window.BW = window.BW || {};
           vx += side * tnx * 1.6; vy += side * tny * 1.6;
         }
       };
-      for (const o of BW.state.obstacles) steer(o.x, o.y, o.r);
-      for (const b of BW.state.buildings) if (cfg.BUILDING_STATS[b.kind].blocks) steer(b.x, b.y, entityRadius(b));
+      if (!s.flying) {                                     // flyers don't dodge ground blockers
+        for (const o of BW.state.obstacles) steer(o.x, o.y, o.r);
+        for (const b of BW.state.buildings) if (cfg.BUILDING_STATS[b.kind].blocks) steer(b.x, b.y, entityRadius(b));
+      }
       const vl = Math.hypot(vx, vy) || 1;
       mvx = (vx / vl) * s.speed; mvy = (vy / vl) * s.speed;
       u.heading = Math.atan2(mvy, mvx);
@@ -127,7 +131,7 @@ window.BW = window.BW || {};
     return best;
   }
   function nestThreat(u) {
-    const nest = nearestOwn(u.team, b => b.kind === 'nest');
+    const nest = nearestOwn(u.team, b => cfg.BUILDING_STATS[b.kind].category === 'nest');
     if (!nest) return null;
     return nearestEnemy(nest.x, nest.y, u.team, cfg.guardRange);
   }
@@ -240,7 +244,7 @@ window.BW = window.BW || {};
       case 'idle':
       default: {
         const isHuman = BW.state.controllers[u.team] === 'human';
-        if (u.kind === 'worker') {
+        if (u.kind === gathererKind(u.team)) {
           // Human workers auto-gather the nearest resource by default (you can
           // still drag-select and redirect them anytime). AI workers stay idle
           // for the AI controller to assign by resource ratio.
@@ -252,7 +256,7 @@ window.BW = window.BW || {};
           const t = acquireTarget(u) || nestThreat(u);
           if (t) { pursueAndStrike(u, t, dt); break; }           // engage a threat first
           if (isHuman) {                                          // otherwise hold a guard ring at home
-            const nest = nearestOwn(u.team, b => b.kind === 'nest');
+            const nest = nearestOwn(u.team, b => cfg.BUILDING_STATS[b.kind].category === 'nest');
             if (nest && dist(u, nest) <= cfg.guardHomeRange) {
               const a = u.id * 2.39996;                           // golden angle → soldiers fan around the ring
               const gx = nest.x + Math.cos(a) * cfg.guardRadius, gy = nest.y + Math.sin(a) * cfg.guardRadius;
@@ -274,13 +278,14 @@ window.BW = window.BW || {};
 
     // Anti-softlock: a nest with NO living workers slowly hatches a FREE one,
     // so losing your whole worker line is recoverable, not game over.
-    if (b.kind === 'nest') {
-      const hasWorker = BW.state.units.some(u => u.team === b.team && u.kind === 'worker');
+    if (cfg.BUILDING_STATS[b.kind].category === 'nest') {
+      const g = gathererKind(b.team);
+      const hasWorker = BW.state.units.some(u => u.team === b.team && u.kind === g);
       if (hasWorker) b.emergencyTimer = cfg.emergencyWorkerTime;
       else {
         b.emergencyTimer = (b.emergencyTimer == null ? cfg.emergencyWorkerTime : b.emergencyTimer) - dt;
         if (b.emergencyTimer <= 0) {
-          BW.state.units.push(BW.world.createUnit('worker', b.team, b.rallyX, b.rallyY));
+          BW.state.units.push(BW.world.createUnit(g, b.team, b.rallyX, b.rallyY));
           b.emergencyTimer = cfg.emergencyWorkerTime;
         }
       }
@@ -316,7 +321,7 @@ window.BW = window.BW || {};
     const stat = cfg.UNIT_STATS[kind];
     const producer = producerFor(kind, team);
     if (!producer) {
-      const where = stat.trainedAt === 'barracks' ? 'a Barracks' : stat.trainedAt === 'workshop' ? 'a Workshop' : 'a nest';
+      const tn = stat.trainedAt, where = tn === 'nest' || tn === 'hive' ? 'a base' : 'a ' + tn.charAt(0).toUpperCase() + tn.slice(1);
       return { ok: false, reason: `Build ${where} first` };
     }
     if (countUnits(team) + queued(team) >= cfg.popCap) return { ok: false, reason: 'Population cap reached' };
