@@ -148,6 +148,8 @@ window.BW = window.BW || {};
     if (e.key === 'e' || e.key === 'E') return BW.select.army();
     if (e.key === 'p' || e.key === 'P') BW.togglePause();
     if (e.key === 'r' || e.key === 'R') BW.restart();
+    if (e.key === '[' || e.key === '-' || e.key === '_') return BW.cycleSpeed(-1);   // slower
+    if (e.key === ']' || e.key === '=' || e.key === '+') return BW.cycleSpeed(+1);    // faster
     if (e.key === 'Escape') { if (BW.state.placing) BW.state.placing = null; else BW.state.selected.clear(); }
   }
 
@@ -167,6 +169,8 @@ window.BW = window.BW || {};
     document.querySelectorAll('[data-action="restart"]').forEach(b => b.addEventListener('click', () => BW.restart()));
     const pause = document.getElementById('pauseBtn');
     if (pause) pause.addEventListener('click', () => BW.togglePause());
+    const sd = document.getElementById('speedDown'); if (sd) sd.addEventListener('click', () => BW.cycleSpeed(-1));
+    const su = document.getElementById('speedUp');   if (su) su.addEventListener('click', () => BW.cycleSpeed(+1));
   }
 
   BW.input = { attach, unitsInBox };

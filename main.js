@@ -31,6 +31,26 @@ window.BW = window.BW || {};
 
   BW.togglePause = function () { if (BW.state.phase === 'playing') BW.state.paused = !BW.state.paused; };
 
+  /* ---- live game-speed control ---------------------------------------
+     The loop reads cfg.gameSpeed fresh each frame, so changing it here
+     takes effect instantly. SPEEDS is the ladder the −/+ buttons & [ ] keys
+     step through; default (config.js) lands on 0.6×. */
+  const SPEEDS = [0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.25];
+  function fmtSpeed(m) { return (+m.toFixed(2)) + '×'; }   // 0.60 -> "0.6×", 1.00 -> "1×"
+  function syncSpeedLabel() { const el = document.getElementById('speedVal'); if (el) el.textContent = fmtSpeed(cfg.gameSpeed); }
+  BW.setGameSpeed = function (m) {
+    cfg.gameSpeed = Math.max(SPEEDS[0], Math.min(SPEEDS[SPEEDS.length - 1], m));
+    syncSpeedLabel();
+  };
+  BW.cycleSpeed = function (dir) {                  // dir = -1 slower, +1 faster
+    let i = 0, bestD = Infinity;
+    SPEEDS.forEach((s, k) => { const d = Math.abs(s - cfg.gameSpeed); if (d < bestD) { bestD = d; i = k; } });
+    i = Math.max(0, Math.min(SPEEDS.length - 1, i + dir));
+    BW.setGameSpeed(SPEEDS[i]);
+    if (BW.toast) BW.toast('Speed ' + fmtSpeed(cfg.gameSpeed));
+  };
+  BW.syncSpeedLabel = syncSpeedLabel;
+
   BW.startGame = function (difficulty, opts) {
     BW.world.initWorld(difficulty || 'normal', opts);
     BW.state.phase = 'playing';
@@ -55,6 +75,7 @@ window.BW = window.BW || {};
     BW.canvas = canvas;
     BW.world.initWorld('normal');
     BW.state.phase = 'menu';                        // board sits behind the menu
+    syncSpeedLabel();                               // show the starting speed (0.6×)
     BW.input.attach(canvas);
     if (!running) { running = true; requestAnimationFrame(frame); }
   }

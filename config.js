@@ -14,7 +14,11 @@ BW.config = {
 
   /* ---- The battlefield ------------------------------------------------- */
   world: { width: 1280, height: 720 },
-  gameSpeed: 1.0,            // master tempo (1 = normal). Lower = calmer.
+  gameSpeed: 0.6,            // master tempo (1 = old "normal"). Lower = calmer.
+                            // Live-adjustable in-game with the Speed −/+ controls
+                            // (or [ and ] keys). Scales the whole sim uniformly —
+                            // movement, combat, gather, training AND the AI's
+                            // attack timing all stretch together, balance intact.
 
   /* ---- Economy --------------------------------------------------------- */
   // Each side starts with this. Food trains units; Mud builds structures;
