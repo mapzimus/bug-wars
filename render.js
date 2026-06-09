@@ -148,15 +148,20 @@ window.BW = window.BW || {};
   function drawAnt(ctx, u, time) {
     const s = cfg.UNIT_STATS[u.kind], r = s.radius * 1.2, tint = tintOf(u.team);
     const bee = BW.state.faction && BW.state.faction[u.team] === 'bees';
-    const flying = s.flying;
+    const flying = s.flying;                              // true flyer (hornet) — also ignores walls (systems.js)
+    const airborne = flying || bee;                      // ALL bees hover — VISUAL ONLY, no balance change
+    const lift = flying ? r * 1.0 : (bee ? r * 0.55 : 0); // how high off the ground it's drawn
 
-    if (flying) { ctx.fillStyle = 'rgba(0,0,0,0.20)'; fillEllipse(ctx, u.x, u.y + r * 1.2, r * 0.9, r * 0.38); }   // ground shadow
+    if (airborne) {                                       // ground shadow under anything off the ground
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      fillEllipse(ctx, u.x, u.y + r * 1.2, r * (flying ? 0.9 : 0.78), r * 0.36);
+    }
 
     ctx.save();
-    ctx.translate(u.x, u.y - (flying ? r * 1.0 : 0));     // elevate flyers
+    ctx.translate(u.x, u.y - lift);                       // elevate flyers / hovering bees
     ctx.rotate(u.heading);
 
-    if (!flying) {                                        // walking legs
+    if (!airborne) {                                      // walking legs (grounded units only)
       ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.16); ctx.lineCap = 'round';
       const ph = time * 9 + u.id * 1.7;
       for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
@@ -165,7 +170,7 @@ window.BW = window.BW || {};
       }
     }
     if (bee) {                                            // beating wings
-      const wf = Math.sin(time * (flying ? 38 : 20) + u.id) * 0.35;
+      const wf = Math.sin(time * (flying ? 40 : 32) + u.id) * 0.4;   // lively hover for all bees
       ctx.fillStyle = 'rgba(225,238,255,0.45)'; ctx.strokeStyle = 'rgba(200,222,255,0.65)'; ctx.lineWidth = 1;
       for (const side of [-1, 1]) {
         ctx.save(); ctx.translate(0, side * 0.32 * r); ctx.rotate(side * (0.55 + wf));
