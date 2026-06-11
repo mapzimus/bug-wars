@@ -43,6 +43,8 @@ window.BW = window.BW || {};
   const enemyAt       = p => pick([...BW.state.units, ...BW.state.buildings].filter(e => e.team === 'enemy'), p, 4);
   const nodeAt        = p => pick(BW.state.nodes, p, 5);
   const ownNestAt     = p => pick(BW.state.buildings.filter(b => b.team === 'player' && BW.config.BUILDING_STATS[b.kind].category === 'nest'), p, 6);
+  // any of your production buildings (anything that trains units — nest/hive included), for setting a rally point
+  const playerProducerAt = p => pick(BW.state.buildings.filter(b => b.team === 'player' && BW.config.BUILDING_STATS[b.kind].trains), p, 6);
 
   function addPing(x, y, type) { BW.state.pings.push({ x, y, type, t: BW.state.time }); }
 
@@ -92,7 +94,7 @@ window.BW = window.BW || {};
   function onMouseUp(e) {
     if (e.button !== 0 || !dragStart) return;
     const p = worldPos(e), s = BW.state;
-    if (dragging) s.selected = new Set(unitsInBox(s.units, dragStart.x, dragStart.y, p.x, p.y, 'player'));
+    if (dragging) { s.selected = new Set(unitsInBox(s.units, dragStart.x, dragStart.y, p.x, p.y, 'player')); s.selectedBuilding = null; }
     else {
       const u = playerUnitAt(p);
       if (u) {
@@ -102,7 +104,12 @@ window.BW = window.BW || {};
         else if (e.shiftKey) s.selected.add(u.id);
         else s.selected = new Set([u.id]);
         lastClick = { t: now, kind: u.kind, x: p.x, y: p.y };
-      } else if (!e.shiftKey) s.selected.clear();
+        s.selectedBuilding = null;                                   // units take over the selection
+      } else {
+        const b = playerProducerAt(p);                              // clicked a production building? select it to set its rally
+        if (b) { s.selectedBuilding = b.id; s.selected.clear(); if (BW.sound) BW.sound.play('select'); toast('Right-click a spot (or a resource) to set the rally point'); }
+        else if (!e.shiftKey) { s.selected.clear(); s.selectedBuilding = null; }
+      }
     }
     dragStart = null; dragging = false; s.drag = null;
   }
@@ -113,6 +120,18 @@ window.BW = window.BW || {};
     const s = BW.state;
     if (s.phase !== 'playing' || !human()) return;   // spectating AI-vs-AI: no commands
     if (s.placing) { s.placing = null; return; }   // cancel placement
+    // A production building is selected → right-click sets its RALLY point (new units walk there;
+    // a gatherer rallied onto a resource node will mine it).
+    if (s.selectedBuilding != null) {
+      const b = BW.byId(s.selectedBuilding);
+      if (b) {
+        const p = worldPos(e), rnode = nodeAt(p);
+        b.rally = { x: p.x, y: p.y, nodeId: rnode ? rnode.id : null };
+        addPing(p.x, p.y, rnode ? 'gather' : 'move');
+        if (BW.sound) BW.sound.play(rnode ? 'gather' : 'move');
+      }
+      return;
+    }
     if (s.selected.size === 0) return;
     const p = worldPos(e), enemy = enemyAt(p), node = nodeAt(p), home = ownNestAt(p);
     const n = s.selected.size; let i = 0;
@@ -150,7 +169,7 @@ window.BW = window.BW || {};
     if (e.key === 'r' || e.key === 'R') BW.restart();
     if (e.key === '[' || e.key === '-' || e.key === '_') return BW.cycleSpeed(-1);   // slower
     if (e.key === ']' || e.key === '=' || e.key === '+') return BW.cycleSpeed(+1);    // faster
-    if (e.key === 'Escape') { if (BW.state.placing) BW.state.placing = null; else BW.state.selected.clear(); }
+    if (e.key === 'Escape') { if (BW.state.placing) BW.state.placing = null; else { BW.state.selected.clear(); BW.state.selectedBuilding = null; } }
   }
 
   function attach(canvas) {

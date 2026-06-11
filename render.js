@@ -277,6 +277,26 @@ window.BW = window.BW || {};
   }
 
   /* ---- main draw ------------------------------------------------------- */
+  // selected production building: ring it, and show where its rally point sends new units
+  function drawRally(ctx) {
+    const s = BW.state;
+    if (s.selectedBuilding == null) return;
+    const b = BW.byId(s.selectedBuilding); if (!b) return;
+    ring(ctx, b.x, b.y, ER(b) + 6, C.selection, 2.5);
+    const rx = b.rally ? b.rally.x : b.rallyX, ry = b.rally ? b.rally.y : b.rallyY;
+    if (rx == null) return;
+    ctx.save();
+    ctx.strokeStyle = C.selection; ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(rx, ry); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 2;                  // flag pole
+    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx, ry - 17); ctx.stroke();
+    ctx.fillStyle = C.selection;                                            // flag
+    ctx.beginPath(); ctx.moveTo(rx, ry - 17); ctx.lineTo(rx + 12, ry - 13); ctx.lineTo(rx, ry - 9); ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 1; ctx.stroke();
+    fillEllipse(ctx, rx, ry, 2.5, 2.5);                                     // base dot
+    ctx.restore();
+  }
+
   function render(ctx) {
     const s = BW.state;
     drawBackground(ctx);
@@ -284,6 +304,7 @@ window.BW = window.BW || {};
     s.obstacles.forEach(o => drawRock(ctx, o));
     s.buildings.forEach(b => drawBuilding(ctx, b));
     for (const id of s.selected) { const u = BW.byId(id); if (u) ring(ctx, u.x, u.y, ER(u) + 5, C.selection, 2); }
+    drawRally(ctx);
     for (const u of s.units) drawAnt(ctx, u, s.time);
     for (const u of s.units) if (u.hp < u.maxHp) bar(ctx, u.x, u.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
     drawAlerts(ctx); drawPings(ctx); drawGhost(ctx);

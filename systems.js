@@ -272,6 +272,17 @@ window.BW = window.BW || {};
     }
   }
 
+  // Route a freshly-trained unit to its building's RALLY point, if the player set one.
+  // A gatherer rallied onto a resource node starts mining it; anyone else walks there
+  // (fighters attack-move so they engage anything on the way).
+  function sendToRally(b, u) {
+    if (!b.rally) return;
+    const isG = u.kind === gathererKind(b.team);
+    const node = b.rally.nodeId != null ? BW.byId(b.rally.nodeId) : null;
+    if (isG && node && node.kind === 'node') u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
+    else u.order = { type: isG ? 'move' : 'attackMove', tx: b.rally.x, ty: b.rally.y, targetId: null };
+  }
+
   function updateBuilding(b, dt) {
     const s = cfg.BUILDING_STATS[b.kind];
     if (b.attackCooldown > 0) b.attackCooldown -= dt;
@@ -296,7 +307,9 @@ window.BW = window.BW || {};
       b.trainTimer -= dt;
       if (b.trainTimer <= 0) {
         const kind = b.trainQueue.shift();
-        BW.state.units.push(BW.world.createUnit(kind, b.team, b.rallyX, b.rallyY));
+        const u = BW.world.createUnit(kind, b.team, b.rallyX, b.rallyY);
+        BW.state.units.push(u);
+        sendToRally(b, u);                                // walk to the player-set rally, if any
         if (BW.sound && BW.state.controllers[b.team] === 'human') BW.sound.play('train');
         b.trainTimer = b.trainQueue.length ? cfg.UNIT_STATS[b.trainQueue[0]].buildTime : 0;
       }

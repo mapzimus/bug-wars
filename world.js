@@ -59,6 +59,7 @@ window.BW = window.BW || {};
     const state = {
       units: [], buildings: [], nodes: [], obstacles: [],
       selected: new Set(),
+      selectedBuilding: null,         // a production building whose RALLY point you're setting
       res: {                          // per-side resource stores
         player: { ...cfg.startingResources },
         enemy:  { ...cfg.startingResources },
@@ -140,6 +141,7 @@ window.BW = window.BW || {};
     for (const id of [...s.selected]) {
       if (!s.units.some(u => u.id === id)) s.selected.delete(id);
     }
+    if (s.selectedBuilding != null && !s.buildings.some(b => b.id === s.selectedBuilding)) s.selectedBuilding = null;
   }
 
   BW.world = { createUnit, createBuilding, createNode, initWorld, nextId };
