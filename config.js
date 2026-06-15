@@ -17,8 +17,8 @@ BW.config = {
   world: { width: 2560, height: 1440 },   // the MAP (4x the old area)
   view:  { width: 1280, height: 720 },    // the CANVAS — a camera window into the world
   camera: {
-    edgeSize: 26,        // px from the canvas edge that triggers edge-scrolling
-    edgeSpeed: 950,      // px/s while edge-scrolling
+    edgeSize: 24,        // px from the canvas edge that triggers edge-scrolling
+    edgeSpeed: 820,      // px/s while edge-scrolling (gentler = more controllable)
     keySpeed: 1100,      // px/s for WASD / arrow keys
   },
   minimap: { w: 200, margin: 12 },        // bottom-right; height follows world aspect
@@ -218,7 +218,7 @@ BW.config = {
       army: { frontline: 'guard', skirmisher: 'striker', siege: 'carpenter', flyer: 'hornet' },
     },
     beetles: {
-      name: 'Beetles', emoji: '🪲', style: 'beetle', base: 'mound', gatherer: 'grub',
+      name: 'Beetles', emoji: '🐞', style: 'beetle', base: 'mound', gatherer: 'grub',
       producers: ['den', 'burrow'],
       buildMenu: ['den', 'burrow', 'granary', 'tower', 'wall'],
       trainMenu: ['grub', 'bruiser', 'bombardier', 'ram'],

@@ -81,7 +81,9 @@ window.BW = window.BW || {};
     if (held.has('w') || held.has('ArrowUp'))    dy -= 1;
     if (held.has('s') || held.has('ArrowDown'))  dy += 1;
     if (dx || dy) { s.camera.x += dx * cfg.camera.keySpeed * dtReal; s.camera.y += dy * cfg.camera.keySpeed * dtReal; }
-    if (pointer && !s.drag && !minimapPan) {      // edge scroll (off while box-selecting or minimap-panning)
+    // edge scroll — off while box-selecting, minimap-panning, middle-drag-panning,
+    // or when the cursor is over the minimap (so reaching for it doesn't run the camera away)
+    if (pointer && !s.drag && !minimapPan && !panDrag && !inMinimap(pointer)) {
       const ez = cfg.camera.edgeSize, sp = cfg.camera.edgeSpeed, v = cfg.view;
       if (pointer.x < ez) s.camera.x -= sp * dtReal; else if (pointer.x > v.width - ez)  s.camera.x += sp * dtReal;
       if (pointer.y < ez) s.camera.y -= sp * dtReal; else if (pointer.y > v.height - ez) s.camera.y += sp * dtReal;
@@ -137,12 +139,19 @@ window.BW = window.BW || {};
   }
   BW.toast = toast;
 
-  /* ---- selection drag + minimap pan ------------------------------------ */
-  let dragStart = null, dragging = false, minimapPan = false;
+  /* ---- selection drag + minimap pan + middle-drag pan ------------------- */
+  let dragStart = null, dragging = false, minimapPan = false, panDrag = null;
   const DRAG = 6;
 
   function onMouseDown(e) {
-    if (e.button !== 0 || BW.state.phase !== 'playing') return;
+    if (BW.state.phase !== 'playing') return;
+    if (e.button === 1) {                         // MIDDLE-drag grabs and pans the map
+      e.preventDefault();
+      const sp = screenPos(e);
+      panDrag = { sx: sp.x, sy: sp.y, camx: BW.state.camera.x, camy: BW.state.camera.y };
+      return;
+    }
+    if (e.button !== 0) return;
     const sp = screenPos(e);
     if (inMinimap(sp)) {                          // minimap: jump + start panning
       const w = miniToWorld(sp);
@@ -166,6 +175,11 @@ window.BW = window.BW || {};
   function onMouseMove(e) {
     const sp = screenPos(e);
     pointer = (sp.x >= 0 && sp.y >= 0 && sp.x <= cfg.view.width && sp.y <= cfg.view.height) ? sp : null;
+    if (panDrag) {                                // middle-drag: move the world with the cursor
+      BW.state.camera.x = panDrag.camx - (sp.x - panDrag.sx);
+      BW.state.camera.y = panDrag.camy - (sp.y - panDrag.sy);
+      clampCamera(); return;
+    }
     if (minimapPan) { const w = miniToWorld(sp); BW.centerCamera(w.x, w.y); return; }
     const p = worldPos(e);
     if (BW.state.placing) { BW.state.placeXY = p; return; }
@@ -174,6 +188,7 @@ window.BW = window.BW || {};
     if (dragging) BW.state.drag = { x0: dragStart.x, y0: dragStart.y, x1: p.x, y1: p.y };
   }
   function onMouseUp(e) {
+    if (panDrag) { panDrag = null; return; }      // end middle-drag pan
     if (e.button !== 0) return;
     if (minimapPan) { minimapPan = false; return; }
     if (!dragStart) return;
@@ -274,7 +289,7 @@ window.BW = window.BW || {};
     canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', () => held.clear());     // don't get stuck scrolling on alt-tab
+    window.addEventListener('blur', () => { held.clear(); panDrag = null; minimapPan = false; });  // don't get stuck on alt-tab
     // Delegated so dynamically-rebuilt faction panels keep working.
     const panel = document.querySelector('.panel');
     if (panel) panel.addEventListener('click', e => {
