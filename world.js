@@ -51,9 +51,10 @@ window.BW = window.BW || {};
   function initWorld(difficulty, opts) {
     const W = cfg.world.width, H = cfg.world.height;
     const playerAI = !!(opts && opts.playerAI);   // AI-vs-AI watch / test mode
-    // factions: player picks one; the enemy gets the opposite (always a cross-faction match)
+    // factions: player picks one; the enemy is a random OTHER faction
     const pFac = (opts && opts.faction) || 'ants';
-    const eFac = (opts && opts.enemyFaction) || (pFac === 'ants' ? 'bees' : 'ants');
+    const others = Object.keys(cfg.FACTIONS).filter(f => f !== pFac);
+    const eFac = (opts && opts.enemyFaction) || others[Math.floor(Math.random() * others.length)];
     const FP = cfg.FACTIONS[pFac], FE = cfg.FACTIONS[eFac];
 
     const state = {
@@ -76,12 +77,17 @@ window.BW = window.BW || {};
       placing: null,                  // { kind } while in build-placement mode
       placeXY: null,                  // ghost position
       pings: [], alerts: [],
+      camera: { x: 0, y: 0 },         // top-left of the view window, in world coords
       time: 0,
     };
 
-    const playerNest = createBuilding(FP.base, 'player', 170, H - 150);
-    const enemyNest  = createBuilding(FE.base, 'enemy',  W - 170, 150);
+    const playerNest = createBuilding(FP.base, 'player', 340, H - 300);
+    const enemyNest  = createBuilding(FE.base, 'enemy',  W - 340, 300);
     state.buildings.push(playerNest, enemyNest);
+
+    // Start looking at your own base.
+    state.camera.x = Math.max(0, Math.min(W - cfg.view.width,  playerNest.x - cfg.view.width / 2));
+    state.camera.y = Math.max(0, Math.min(H - cfg.view.height, playerNest.y - cfg.view.height / 2));
 
     // Starting gatherers for BOTH sides (the AI runs a real economy too).
     const ring = (nest, team, gatherer) => {
@@ -93,23 +99,28 @@ window.BW = window.BW || {};
     ring(playerNest, 'player', FP.gatherer);
     ring(enemyNest, 'enemy', FE.gatherer);
 
-    // Resource layout: FOOD near each base, MUD in the mid-lanes,
-    // HONEYDEW scarce and contested in the center.
-    const nodes = [
-      ['food', 320, H - 170], ['food', 300, H - 250], ['food', 235, H - 300],
-      ['food', W - 320, 170], ['food', W - 300, 250], ['food', W - 235, 300],
-      ['mud', 430, H - 300], ['mud', W - 430, 300],
-      ['mud', W / 2 - 230, H / 2 + 120], ['mud', W / 2 + 230, H / 2 - 120],
-      ['honeydew', W / 2, H / 2], ['honeydew', W / 2 - 90, H / 2 + 70], ['honeydew', W / 2 + 90, H / 2 - 70],
+    // Resource layout (180°-rotationally symmetric = fair): FOOD near each base,
+    // MUD along the lanes, HONEYDEW contested in the center + far corners.
+    const mirror = ([r, x, y]) => [r, W - x, H - y];
+    const half = [
+      ['food', 560, H - 300], ['food', 530, H - 440], ['food', 420, H - 530],   // player's food ring
+      ['food', W / 2, H - 120],                                                  // bottom-mid expansion
+      ['mud', 760, H - 440], ['mud', 1050, H - 180],                             // player-side mud
+      ['mud', W / 2 - 170, H / 2 + 120],                                         // center mud (pair via mirror)
+      ['honeydew', W / 2 - 120, H / 2 + 80],                                     // center honeydew (pair)
+      ['honeydew', 300, 330],                                                    // far-corner expansion (pair)
     ];
+    const nodes = [...half, ...half.map(mirror), ['honeydew', W / 2, H / 2]];
     nodes.forEach(([r, x, y]) => state.nodes.push(createNode(r, x, y)));
 
-    // A few rocks for shape (walls get added to avoidance dynamically).
-    state.obstacles = [
-      { x: W / 2,       y: H / 2 - 210, r: 44 },
-      { x: W / 2 - 300, y: H / 2 + 30,  r: 34 },
-      { x: W / 2 + 300, y: H / 2 - 30,  r: 34 },
+    // Rocks shape lanes and give walls anchor points (mirrored for fairness).
+    const rocksHalf = [
+      { x: W / 2,       y: H / 2 - 250, r: 48 },
+      { x: W / 2 - 460, y: H / 2,       r: 36 },
+      { x: 560,         y: H / 2 + 200, r: 30 },
+      { x: 1060,        y: H - 240,     r: 26 },
     ];
+    state.obstacles = [...rocksHalf, ...rocksHalf.map(o => ({ x: W - o.x, y: H - o.y, r: o.r }))];
 
     BW.state = state;
     return state;

@@ -23,6 +23,8 @@ window.BW = window.BW || {};
       if (!s.paused && s.phase === 'playing') BW.update((STEP / 1000) * cfg.gameSpeed);
       acc -= STEP;
     }
+    // Camera pans on REAL time (works while paused, ignores gameSpeed).
+    if (BW.input && BW.input.updateCamera) BW.input.updateCamera(delta / 1000);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     BW.render(ctx);
     if (BW.ui) BW.ui.tick();
@@ -56,11 +58,12 @@ window.BW = window.BW || {};
     BW.state.phase = 'playing';
     if (BW.ui) { BW.ui.buildPanel(BW.state.faction.player); BW.ui.resetTutorial(); }
   };
-  BW.restart = function () {                       // replay same difficulty + faction + mode
+  BW.restart = function () {                       // replay same difficulty + matchup + mode
     const d = (BW.state && BW.state.difficulty) || 'normal';
     const watch = !!(BW.state && BW.state.watchMode);
     const faction = (BW.state && BW.state.faction) ? BW.state.faction.player : 'ants';
-    BW.world.initWorld(d, { playerAI: watch, faction }); BW.state.phase = 'playing';
+    const enemyFaction = (BW.state && BW.state.faction) ? BW.state.faction.enemy : undefined;
+    BW.world.initWorld(d, { playerAI: watch, faction, enemyFaction }); BW.state.phase = 'playing';
     if (BW.ui) { BW.ui.buildPanel(faction); BW.ui.resetTutorial(); }
   };
   BW.toMenu = function () {                         // back to the start screen
@@ -71,7 +74,7 @@ window.BW = window.BW || {};
   function start() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
-    canvas.width = cfg.world.width; canvas.height = cfg.world.height;
+    canvas.width = cfg.view.width; canvas.height = cfg.view.height;   // the camera window, NOT the world
     BW.canvas = canvas;
     BW.world.initWorld('normal');
     BW.state.phase = 'menu';                        // board sits behind the menu

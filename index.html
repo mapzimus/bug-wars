@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bug Wars — Maxwell Howe GIS</title>
-  <meta name="description" content="Bug Wars: a browser real-time strategy game. Command an ant colony — gather three resources, build, defend, and destroy the rival nest.">
-  <link rel="icon" type="image/svg+xml" href="../images/favicon.svg">
+  <meta name="description" content="Bug Wars: a browser real-time strategy game. Command ants, bees, beetles, or spiders — gather three resources, build, defend, and destroy the rival nest.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%90%9C%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
   <!-- ===== Top bar ===== -->
   <header class="topbar">
     <div class="leftgroup">
-      <a href="../portfolio.html" class="back-link" title="Back to portfolio">↩ <span class="bl-text">portfolio</span></a>
+      <a href="https://maxwellhowegis.com/side-projects.html" class="back-link" title="Back to maxwellhowegis.com">↩ <span class="bl-text">maxwellhowegis</span></a>
       <div class="brand"><span class="logo">🐜</span><span class="title">BUG WARS</span></div>
     </div>
     <div class="stats">
@@ -39,7 +39,7 @@
   <!-- ===== Play area ===== -->
   <main class="stage">
     <canvas id="gameCanvas" width="1280" height="720"></canvas>
-    <div id="warnBanner" class="warn-banner">⚠ The red colony is attacking!</div>
+    <div id="warnBanner" class="warn-banner">⚠ The red colony is attacking! (Space jumps there)</div>
     <div id="spectateBadge" class="spectate-badge">👁 SPECTATING · AI vs AI · press R to restart</div>
     <div id="toast" class="toast"></div>
 
@@ -50,6 +50,7 @@
         <button class="selbtn" data-select="all" title="Select all units">All</button>
         <button class="selbtn" data-select="workers" title="All workers (Q)">Workers</button>
         <button class="selbtn" data-select="army" title="All fighters (E)">Army</button>
+        <button class="selbtn" data-select="idleWorkers" title="Idle workers (.)">Idle</button>
       </div>
       <div id="selSummary" class="sel-summary">drag a box to select · double-click a unit for all of its type</div>
     </div>
@@ -65,17 +66,20 @@
     <div id="menu" class="overlay menu">
       <div class="overlay-card menu-card">
         <h1 class="menu-title">BUG WARS</h1>
-        <p class="menu-sub">A backyard real-time strategy game. Out-economy, out-build, and out-fight a rival ant colony.</p>
+        <p class="menu-sub">A backyard real-time strategy game. Out-economy, out-build, and out-fight a rival colony.</p>
         <div class="how">
           <div><b>Gather</b> — drag-select workers, right-click <span class="c-food">Food</span> / <span class="c-mud">Mud</span> / <span class="c-honey">Honeydew</span> to mine. They keep at it until you move them.</div>
-          <div><b>Build &amp; Train</b> — spend Mud on buildings, Food to train units. Counters matter: infantry &gt; skirmisher &gt; siege &gt; buildings, and skirmishers shoot down flyers.</div>
+          <div><b>Build &amp; Train</b> — spend Mud on buildings, Food to train units. Counters matter: infantry &gt; skirmisher &gt; siege &gt; buildings, and skirmishers shoot down flyers. Walls only fall to siege.</div>
+          <div><b>Explore</b> — the map is bigger than your screen. Scroll with WASD / arrows / screen edges, or click the minimap. Space jumps to the action.</div>
           <div><b>Win</b> — destroy the enemy base before they destroy yours. You'll get a warning when they march.</div>
         </div>
         <div class="facrow">
           <span class="fac-label">Play as</span>
           <button class="ctrl facbtn selected" data-faction="ants">🐜 Ants</button>
           <button class="ctrl facbtn" data-faction="bees">🐝 Bees</button>
-          <span class="fac-vs">— you'll face the other faction</span>
+          <button class="ctrl facbtn" data-faction="beetles">🪲 Beetles</button>
+          <button class="ctrl facbtn" data-faction="spiders">🕷️ Spiders</button>
+          <span class="fac-vs">— you'll face a random rival</span>
         </div>
         <div class="diffrow">
           <button class="ctrl big diffbtn" data-diff="easy">Easy</button>

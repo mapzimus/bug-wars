@@ -1,11 +1,12 @@
 /* ============================================================================
-   Bug Wars — config.js   (v2: deep AoE-style)
+   Bug Wars — config.js   (v4: big maps, four factions)
    ----------------------------------------------------------------------------
    THE TUNING FILE. Every balance knob lives here as plain data the rest of the
    game reads at runtime. Change a number, reload, watch the game change.
 
-   v2 adds: three resources, a buildings table, a unit-counter table, and AI
-   difficulty profiles. Loads first; creates the global BW namespace.
+   v4 adds: a world larger than the screen (the `view` is a camera into it),
+   minimap + camera tuning, two new factions (Beetles, Spiders), and a wall /
+   pacing rebalance for longer, more strategic games.
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -13,7 +14,15 @@ window.BW = window.BW || {};
 BW.config = {
 
   /* ---- The battlefield ------------------------------------------------- */
-  world: { width: 1280, height: 720 },
+  world: { width: 2560, height: 1440 },   // the MAP (4x the old area)
+  view:  { width: 1280, height: 720 },    // the CANVAS — a camera window into the world
+  camera: {
+    edgeSize: 26,        // px from the canvas edge that triggers edge-scrolling
+    edgeSpeed: 950,      // px/s while edge-scrolling
+    keySpeed: 1100,      // px/s for WASD / arrow keys
+  },
+  minimap: { w: 200, margin: 12 },        // bottom-right; height follows world aspect
+
   gameSpeed: 0.6,            // master tempo (1 = old "normal"). Lower = calmer.
                             // Live-adjustable in-game with the Speed −/+ controls
                             // (or [ and ] keys). Scales the whole sim uniformly —
@@ -24,7 +33,7 @@ BW.config = {
   // Each side starts with this. Food trains units; Mud builds structures;
   // Honeydew is scarce and buys elite units / (later) upgrades.
   startingResources: { food: 200, mud: 150, honeydew: 0 },
-  popCap: 50,
+  popCap: 80,                 // bumped for the bigger map + longer games (room for real armies)
   startingWorkers: 5,
 
   gather: {
@@ -43,9 +52,11 @@ BW.config = {
 
   /* ---- Units: stats + costs + counter class ----------------------------
      class drives the COUNTERS table below. cost is a {resource: amount} object.
-     trainedAt = which building kind produces it.
+     trainedAt = which building kind produces it. flying:true = ignores rocks
+     and walls when moving (it does NOT make a unit unhittable).
      -------------------------------------------------------------------- */
   UNIT_STATS: {
+    // ---- Ants: the balanced baseline faction ----
     worker: {
       class: 'worker', hp: 50, speed: 78, damage: 4, range: 12, cooldown: 0.9,
       aggro: 0, radius: 6, buildTime: 4, color: '#caa46a',
@@ -68,7 +79,7 @@ BW.config = {
       cost: { food: 70, mud: 20, honeydew: 25 }, trainedAt: 'workshop',   // honeydew = the premium siege resource
     },
 
-    // ---- Bees (faction #2): mirror the ant roles, plus a FLYER (hornet) ----
+    // ---- Bees: mobile + the hornet flyer ----
     drone: {
       class: 'worker', hp: 46, speed: 84, damage: 4, range: 12, cooldown: 0.9,
       aggro: 0, radius: 6, buildTime: 4, color: '#e6c34d',
@@ -95,40 +106,103 @@ BW.config = {
       aggro: 165, radius: 8, buildTime: 7, color: '#d99520',
       cost: { food: 80, honeydew: 20 }, trainedAt: 'apiary',
     },
+
+    // ---- Beetles (faction #3): slow, heavy, expensive — the armor faction ----
+    grub: {
+      class: 'worker', hp: 60, speed: 70, damage: 4, range: 12, cooldown: 0.9,
+      aggro: 0, radius: 6.5, buildTime: 4.5, color: '#9a8a6a',
+      cost: { food: 50 }, trainedAt: 'mound',
+    },
+    bruiser: {
+      class: 'infantry', hp: 215, speed: 50, damage: 14, range: 15, cooldown: 1.1,
+      aggro: 140, radius: 10, buildTime: 7.5, color: '#6e5a40',
+      cost: { food: 85, mud: 15 }, trainedAt: 'den',
+    },
+    bombardier: {
+      class: 'skirmisher', hp: 85, speed: 96, damage: 8, range: 14, cooldown: 0.6,
+      aggro: 165, radius: 7.5, buildTime: 5.5, color: '#b06a2a',
+      cost: { food: 65, mud: 5 }, trainedAt: 'den',
+      venom: { dps: 8, duration: 3 },
+    },
+    ram: {
+      class: 'siege', hp: 175, speed: 38, damage: 12, range: 16, cooldown: 1.3,
+      aggro: 105, radius: 10, buildTime: 8.5, color: '#55483a',
+      cost: { food: 80, mud: 25, honeydew: 25 }, trainedAt: 'burrow',
+    },
+
+    // ---- Spiders (faction #4): fast, fragile, venomous — the raid faction ----
+    spiderling: {
+      class: 'worker', hp: 42, speed: 92, damage: 4, range: 12, cooldown: 0.9,
+      aggro: 0, radius: 6, buildTime: 3.5, color: '#b9a7d0',
+      cost: { food: 50 }, trainedAt: 'lair',
+    },
+    hunter: {
+      class: 'infantry', hp: 125, speed: 78, damage: 11, range: 14, cooldown: 0.85,
+      aggro: 155, radius: 8.5, buildTime: 5.5, color: '#7a668e',
+      cost: { food: 70, mud: 10 }, trainedAt: 'nursery',
+    },
+    spitter: {
+      class: 'skirmisher', hp: 60, speed: 128, damage: 8, range: 13, cooldown: 0.5,
+      aggro: 175, radius: 7, buildTime: 4.5, color: '#a050b4',
+      cost: { food: 60, mud: 5 }, trainedAt: 'nursery',
+      venom: { dps: 10, duration: 3 },
+    },
+    weaver: {
+      class: 'siege', hp: 112, speed: 50, damage: 10, range: 16, cooldown: 1.15,
+      aggro: 110, radius: 9, buildTime: 6.5, color: '#5a4a6e',
+      cost: { food: 70, mud: 20, honeydew: 25 }, trainedAt: 'spinnery',
+    },
+    balloonist: {
+      class: 'flyer', flying: true, hp: 78, speed: 138, damage: 10, range: 14, cooldown: 0.8,
+      aggro: 165, radius: 7.5, buildTime: 7, color: '#c79ae0',
+      cost: { food: 75, honeydew: 20 }, trainedAt: 'spinnery',   // rides silk threads over walls
+    },
   },
 
-  /* ---- Buildings: the GDD's five categories ---------------------------
+  /* ---- Buildings --------------------------------------------------------
      category: nest | production | storage | defense
      trains[]  → a production building (has a train queue + rally point)
-     drop:true → workers can drop resources here (nest + granary)
+     drop:true → workers can drop resources here (bases + granary)
      damage/range/cooldown/aggro → a defensive tower that fires
      blocks:true → a wall (units path around it; siege chews through it)
+     v4: base/production HP up so games breathe; walls are real fortifications.
      -------------------------------------------------------------------- */
   BUILDING_STATS: {
-    nest:     { category: 'nest',       hp: 1600, radius: 34, cost: {},               trains: ['worker'],              drop: true,  color: '#6b4a2f' },
-    barracks: { category: 'production', hp: 700,  radius: 24, cost: { mud: 120 },     trains: ['soldier', 'fireant'],              color: '#7a5a3a' },
-    workshop: { category: 'production', hp: 700,  radius: 24, cost: { mud: 160 },     trains: ['leafcutter'],                      color: '#5a6a3a' },
-    granary:  { category: 'storage',    hp: 450,  radius: 20, cost: { mud: 70 },                                       drop: true,  color: '#8a7a4a' },
-    tower:    { category: 'defense',    hp: 800,  radius: 18, cost: { mud: 140 },     damage: 16, range: 130, cooldown: 1.0, aggro: 150, color: '#6b6b78' },
-    wall:     { category: 'defense',    hp: 650,  radius: 15, cost: { mud: 25 },      blocks: true,                                color: '#7d7d88' },
-    // ---- Bee buildings (faction #2). granary/tower/wall above are shared. ----
-    hive:     { category: 'nest',       hp: 1600, radius: 34, cost: {},               trains: ['drone'],               drop: true,  color: '#7a5c1f' },
-    brood:    { category: 'production', hp: 700,  radius: 24, cost: { mud: 120 },     trains: ['guard', 'striker'],                color: '#8a6a22' },
-    apiary:   { category: 'production', hp: 700,  radius: 24, cost: { mud: 160 },     trains: ['carpenter', 'hornet'],             color: '#9a7520' },
+    // shared
+    granary:  { category: 'storage',    hp: 500,  radius: 20, cost: { mud: 70 },                                       drop: true,  color: '#8a7a4a' },
+    tower:    { category: 'defense',    hp: 950,  radius: 18, cost: { mud: 140 },     damage: 16, range: 130, cooldown: 1.0, aggro: 150, color: '#6b6b78' },
+    wall:     { category: 'defense',    hp: 1100, radius: 15, cost: { mud: 20 },      blocks: true,                                color: '#7d7d88' },
+    // ants
+    nest:     { category: 'nest',       hp: 2200, radius: 34, cost: {},               trains: ['worker'],              drop: true,  color: '#6b4a2f' },
+    barracks: { category: 'production', hp: 850,  radius: 24, cost: { mud: 120 },     trains: ['soldier', 'fireant'],              color: '#7a5a3a' },
+    workshop: { category: 'production', hp: 850,  radius: 24, cost: { mud: 160 },     trains: ['leafcutter'],                      color: '#5a6a3a' },
+    // bees
+    hive:     { category: 'nest',       hp: 2200, radius: 34, cost: {},               trains: ['drone'],               drop: true,  color: '#7a5c1f' },
+    brood:    { category: 'production', hp: 850,  radius: 24, cost: { mud: 120 },     trains: ['guard', 'striker'],                color: '#8a6a22' },
+    apiary:   { category: 'production', hp: 850,  radius: 24, cost: { mud: 160 },     trains: ['carpenter', 'hornet'],             color: '#9a7520' },
+    // beetles (tougher structures — the armor faction)
+    mound:    { category: 'nest',       hp: 2500, radius: 34, cost: {},               trains: ['grub'],                drop: true,  color: '#5a4632' },
+    den:      { category: 'production', hp: 950,  radius: 24, cost: { mud: 130 },     trains: ['bruiser', 'bombardier'],           color: '#6a5644' },
+    burrow:   { category: 'production', hp: 950,  radius: 24, cost: { mud: 170 },     trains: ['ram'],                             color: '#4f463c' },
+    // spiders (lighter structures — the raid faction)
+    lair:     { category: 'nest',       hp: 2000, radius: 34, cost: {},               trains: ['spiderling'],          drop: true,  color: '#4a3c5a' },
+    nursery:  { category: 'production', hp: 750,  radius: 24, cost: { mud: 120 },     trains: ['hunter', 'spitter'],               color: '#5d4a72' },
+    spinnery: { category: 'production', hp: 750,  radius: 24, cost: { mud: 160 },     trains: ['weaver', 'balloonist'],            color: '#6e5a86' },
   },
 
-  // Build menu order (which building buttons appear).
-  BUILD_MENU: ['barracks', 'workshop', 'granary', 'tower', 'wall'],
-  // Train menu order.
-  TRAIN_MENU: ['worker', 'soldier', 'fireant', 'leafcutter'],
+  // Walls shrug off non-siege hits: anything that isn't siege-class deals this
+  // fraction of its damage to a blocking wall. Siege keeps its full 4x building
+  // bonus — bring rams/leafcutters (or fly over) to crack a fortified line.
+  wallResist: 0.4,
 
-  /* ---- Factions -------------------------------------------------------
+  /* ---- Factions ---------------------------------------------------------
      Each side belongs to a faction. The faction maps generic ROLES to its
      own unit/building kinds, so the engine, AI and UI stay faction-agnostic.
+     style drives how render.js draws the bugs (legs/wings/body shape).
      -------------------------------------------------------------------- */
   FACTIONS: {
     ants: {
-      name: 'Ants', emoji: '🐜', base: 'nest', gatherer: 'worker',
+      name: 'Ants', emoji: '🐜', style: 'ant', base: 'nest', gatherer: 'worker',
       producers: ['barracks', 'workshop'],
       buildMenu: ['barracks', 'workshop', 'granary', 'tower', 'wall'],
       trainMenu: ['worker', 'soldier', 'fireant', 'leafcutter'],
@@ -136,12 +210,28 @@ BW.config = {
       army: { frontline: 'soldier', skirmisher: 'fireant', siege: 'leafcutter', flyer: null },
     },
     bees: {
-      name: 'Bees', emoji: '🐝', base: 'hive', gatherer: 'drone',
+      name: 'Bees', emoji: '🐝', style: 'bee', base: 'hive', gatherer: 'drone',
       producers: ['brood', 'apiary'],
       buildMenu: ['brood', 'apiary', 'granary', 'tower', 'wall'],
       trainMenu: ['drone', 'guard', 'striker', 'carpenter', 'hornet'],
       aiBuildOrder: ['brood', 'apiary', 'tower'],
       army: { frontline: 'guard', skirmisher: 'striker', siege: 'carpenter', flyer: 'hornet' },
+    },
+    beetles: {
+      name: 'Beetles', emoji: '🪲', style: 'beetle', base: 'mound', gatherer: 'grub',
+      producers: ['den', 'burrow'],
+      buildMenu: ['den', 'burrow', 'granary', 'tower', 'wall'],
+      trainMenu: ['grub', 'bruiser', 'bombardier', 'ram'],
+      aiBuildOrder: ['den', 'burrow', 'tower'],
+      army: { frontline: 'bruiser', skirmisher: 'bombardier', siege: 'ram', flyer: null },
+    },
+    spiders: {
+      name: 'Spiders', emoji: '🕷️', style: 'spider', base: 'lair', gatherer: 'spiderling',
+      producers: ['nursery', 'spinnery'],
+      buildMenu: ['nursery', 'spinnery', 'granary', 'tower', 'wall'],
+      trainMenu: ['spiderling', 'hunter', 'spitter', 'weaver', 'balloonist'],
+      aiBuildOrder: ['nursery', 'spinnery', 'tower'],
+      army: { frontline: 'hunter', skirmisher: 'spitter', siege: 'weaver', flyer: 'balloonist' },
     },
   },
 
@@ -149,7 +239,7 @@ BW.config = {
      LEARNING SPOT: attackerClass → { targetClass: damageMultiplier }.
      Unlisted pairs = 1.0. Edit these to reshape every matchup.
        infantry  beats skirmisher
-       skirmisher beats siege
+       skirmisher beats siege (and is the anti-air)
        siege     beats buildings (and is solid vs infantry)
      -------------------------------------------------------------------- */
   COUNTERS: {
@@ -164,13 +254,12 @@ BW.config = {
   /* ---- Enemy AI difficulty profiles -----------------------------------
      The AI plays by the SAME rules you do — it scales these parameters, it
      does not cheat. grace = seconds of peace before it can attack.
+     v4: longer graces + bigger waves = longer, more deliberate games.
      -------------------------------------------------------------------- */
   difficulties: {
-    // grace = seconds before it can attack. Easy is deliberately a slow, small,
-    // late opponent so a new player has lots of room to learn.
-    easy:   { workerTarget: 8,  armyThreshold: 5,  thinkEvery: 1.6, ecoMult: 1.0,  grace: 105 },
-    normal: { workerTarget: 12, armyThreshold: 8,  thinkEvery: 1.1, ecoMult: 1.0,  grace: 70  },
-    hard:   { workerTarget: 16, armyThreshold: 11, thinkEvery: 0.8, ecoMult: 1.12, grace: 48  },
+    easy:   { workerTarget: 8,  armyThreshold: 6,  thinkEvery: 1.6, ecoMult: 1.0,  grace: 120 },
+    normal: { workerTarget: 12, armyThreshold: 9,  thinkEvery: 1.1, ecoMult: 1.0,  grace: 90  },
+    hard:   { workerTarget: 16, armyThreshold: 13, thinkEvery: 0.8, ecoMult: 1.12, grace: 60  },
   },
 
   /* ---- Look & feel ----------------------------------------------------- */

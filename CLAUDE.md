@@ -1,22 +1,26 @@
 # Bug Wars — guide for Claude
 
-**What this is:** A browser real-time strategy game (Age-of-Empires-style, ant theme) the user
-builds **for fun**. It is **NOT a portfolio piece.** It lives at `maxwellhowegis.com/bugwars` but is
-**deliberately unlinked** — no card in `../js/projects.js`, no nav link, reachable only by typing the
-URL. **Do not add it back to the portfolio.**
+**What this is:** A browser real-time strategy game (4 insect factions — Ants/Bees/Beetles/Spiders)
+the user builds **for fun**. It lives in **its own standalone repo `mapzimus/bug-wars`** (files at the
+repo ROOT) and deploys to its **own site `mapzimus.github.io/bug-wars`**. It is linked from the
+portfolio's "Beyond GIS" page (`maxwellhowegis.com/side-projects.html`) as an EXTERNAL link — it is a
+just-for-fun project, not a GIS portfolio card. (It used to live at `maxwellhowegis.com/bugwars`
+inside the portfolio repo; that copy was removed on 2026-06-14 when it moved here.)
 
-**The vision (what the user actually wants):** the real AoE strategic juggle — **economy + attack +
+**The vision (what the user actually wants):** the real strategic juggle — **economy + attack +
 defense + diplomacy**, balanced against a fair, beatable-but-challenging opponent. Depth and *skill*.
-NOT a simplified or auto-played game. The fun is managing many things at once.
+NOT a simplified or auto-played game. The fun is managing many things at once. (Avoid the
+"Age-of-Empires" label in any user-facing copy — call it a real-time strategy game.)
 
 ## Run & test
-- Plain static HTML/CSS/JS in this folder. Deploys via **GitHub Pages on push to `main`** (repo root is
-  `../`, workflow `../.github/workflows/pages.yml`, `CNAME` = maxwellhowegis.com). A push goes live in ~1 min.
+- Plain static HTML/CSS/JS at the repo root. Deploys via **GitHub Pages on push to `main`** (source =
+  `main` / root). A push goes live at **`mapzimus.github.io/bug-wars`** in ~1 min. **Push ONCE** — this
+  is the only copy now (no more portfolio mirror).
 - Local dev: `python -m http.server` in this folder (or the `bugwars` entry in `~/.claude/launch.json`,
   port 8765). **Gotcha:** that local server runs in Claude's sandbox and is **NOT reachable from the
-  user's real browser** at localhost. To show the user, use the **live URL**.
-- To see/drive the running game: connect via the **"Claude in Chrome" MCP** to the user's browser and
-  navigate to `https://maxwellhowegis.com/bugwars/`.
+  user's real browser** at localhost. Headless-test via the `Claude_Preview` MCP (cache-bust each JS
+  file with `fetch(f,{cache:'reload'})` then `location.reload()` — the dev server caches aggressively).
+- To see/drive the running game in the user's browser: navigate to `https://mapzimus.github.io/bug-wars/`.
 
 ## Architecture (no build step, no framework)
 Classic `<script>` tags load in order (**config → world → systems → ai → input → render → main**), all

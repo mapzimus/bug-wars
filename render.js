@@ -32,21 +32,44 @@ window.BW = window.BW || {};
   }
   const tintOf = team => team === 'player' ? C.playerTint : C.enemyTint;
 
-  /* ---- background (cached) -------------------------------------------- */
-  let decor = null;
+  /* ---- background (rendered ONCE to an offscreen canvas) ---------------
+     The world is 4x the screen now; re-stroking a thousand grass blades per
+     frame would hurt. Paint the terrain once, then blit the visible slice. */
+  let decorCanvas = null;
   function buildDecor() {
-    const W = cfg.world.width, H = cfg.world.height, patches = [], blades = [];
-    for (let i = 0; i < 90; i++) patches.push({ x: Math.random() * W, y: Math.random() * H, r: 24 + Math.random() * 70 });
-    for (let i = 0; i < 260; i++) blades.push({ x: Math.random() * W, y: Math.random() * H, len: 5 + Math.random() * 7, lean: (Math.random() - 0.5) * 4 });
-    decor = { patches, blades };
+    const W = cfg.world.width, H = cfg.world.height;
+    decorCanvas = document.createElement('canvas');
+    decorCanvas.width = W; decorCanvas.height = H;
+    const g = decorCanvas.getContext('2d');
+    g.fillStyle = C.grass; g.fillRect(0, 0, W, H);
+    g.fillStyle = C.grassPatch;                                       // mottled grass
+    for (let i = 0; i < 320; i++) { const x = Math.random() * W, y = Math.random() * H, r = 24 + Math.random() * 70; g.beginPath(); g.ellipse(x, y, r, r * 0.7, 0, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = 'rgba(58,96,64,0.5)';                               // darker undertones
+    for (let i = 0; i < 90; i++) { const x = Math.random() * W, y = Math.random() * H, r = 40 + Math.random() * 110; g.beginPath(); g.ellipse(x, y, r, r * 0.55, 0, 0, Math.PI * 2); g.fill(); }
+    g.strokeStyle = 'rgba(30,70,40,0.5)'; g.lineWidth = 1.5; g.lineCap = 'round'; g.beginPath();
+    for (let i = 0; i < 1000; i++) {                                  // grass blades
+      const x = Math.random() * W, y = Math.random() * H, len = 5 + Math.random() * 7, lean = (Math.random() - 0.5) * 4;
+      g.moveTo(x, y); g.lineTo(x + lean, y - len);
+    }
+    g.stroke();
+    for (let i = 0; i < 140; i++) {                                   // pebbles
+      const x = Math.random() * W, y = Math.random() * H, r = 1.5 + Math.random() * 3;
+      g.fillStyle = `rgba(${120 + Math.random() * 40 | 0},${120 + Math.random() * 40 | 0},${125 + Math.random() * 40 | 0},0.5)`;
+      g.beginPath(); g.ellipse(x, y, r, r * 0.8, 0, 0, Math.PI * 2); g.fill();
+    }
+    for (let i = 0; i < 90; i++) {                                    // tiny wildflowers
+      const x = Math.random() * W, y = Math.random() * H, r = 2 + Math.random() * 1.6;
+      const col = ['#e8d8f0', '#f0e6c8', '#f3cfd8', '#dfe9f5'][i % 4];
+      g.fillStyle = col;
+      for (let p = 0; p < 5; p++) { const a = p / 5 * Math.PI * 2; g.beginPath(); g.ellipse(x + Math.cos(a) * r, y + Math.sin(a) * r, r * 0.7, r * 0.7, 0, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = '#e9c46a'; g.beginPath(); g.ellipse(x, y, r * 0.55, r * 0.55, 0, 0, Math.PI * 2); g.fill();
+    }
   }
-  function drawBackground(ctx) {
-    if (!decor) buildDecor();
-    ctx.fillStyle = C.grass; ctx.fillRect(0, 0, cfg.world.width, cfg.world.height);
-    ctx.fillStyle = C.grassPatch; for (const p of decor.patches) fillEllipse(ctx, p.x, p.y, p.r, p.r * 0.7);
-    ctx.strokeStyle = 'rgba(30,70,40,0.5)'; ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.beginPath();
-    for (const b of decor.blades) { ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + b.lean, b.y - b.len); }
-    ctx.stroke();
+  function drawBackground(ctx, cam) {
+    if (!decorCanvas) buildDecor();
+    const v = cfg.view;
+    // blit only the visible slice of the pre-rendered world
+    ctx.drawImage(decorCanvas, cam.x, cam.y, v.width, v.height, cam.x, cam.y, v.width, v.height);
   }
 
   /* ---- nodes / rocks --------------------------------------------------- */
@@ -89,6 +112,15 @@ window.BW = window.BW || {};
     if (b.kind === 'hive') {                            // honeycomb cells
       ctx.strokeStyle = 'rgba(40,28,8,0.55)'; ctx.lineWidth = 1.5;
       for (const [hx, hy] of [[-0.45, -0.38], [0.45, -0.38], [0, 0.52], [-0.55, 0.3], [0.55, 0.3]]) { hexAt(ctx, b.x + hx * r, b.y + hy * r, r * 0.2); ctx.stroke(); }
+    } else if (b.kind === 'lair') {                     // spider web over the mound
+      ctx.strokeStyle = 'rgba(225,230,245,0.35)'; ctx.lineWidth = 1;
+      for (const wr of [0.35, 0.6, 0.85]) { ctx.beginPath(); ctx.arc(b.x, b.y, r * wr, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + Math.cos(a) * r * 0.9, b.y + Math.sin(a) * r * 0.9); }
+      ctx.stroke();
+    } else if (b.kind === 'mound') {                    // beetle mound: packed-earth ridges
+      ctx.strokeStyle = 'rgba(28,20,12,0.45)'; ctx.lineWidth = 2;
+      for (const wr of [0.45, 0.75]) { ctx.beginPath(); ctx.arc(b.x, b.y, r * wr, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke(); }
     }
     ring(ctx, b.x, b.y, r + 3, tint, 3);
   }
@@ -113,6 +145,18 @@ window.BW = window.BW || {};
     } else if (b.kind === 'apiary') {            // honeycomb + core (siege/hornet hub)
       hexAt(ctx, b.x, b.y, r * 0.5); ctx.stroke();
       ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.16, 0, Math.PI * 2); ctx.fill();
+    } else if (b.kind === 'den') {               // beetle den: twin studs
+      ctx.beginPath(); ctx.arc(b.x - r * 0.28, b.y, r * 0.18, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(b.x + r * 0.28, b.y, r * 0.18, 0, Math.PI * 2); ctx.fill();
+    } else if (b.kind === 'burrow') {            // beetle burrow: ram wedge
+      ctx.beginPath(); ctx.moveTo(b.x - r * 0.45, b.y + r * 0.35); ctx.lineTo(b.x, b.y - r * 0.45); ctx.lineTo(b.x + r * 0.45, b.y + r * 0.35); ctx.closePath(); ctx.stroke();
+    } else if (b.kind === 'nursery') {           // spider nursery: egg cluster
+      for (const [ex, ey] of [[-0.3, -0.15], [0.3, -0.15], [0, 0.3]]) { ctx.beginPath(); ctx.arc(b.x + ex * r, b.y + ey * r, r * 0.17, 0, Math.PI * 2); ctx.fill(); }
+    } else if (b.kind === 'spinnery') {          // spider spinnery: web cross
+      ring(ctx, b.x, b.y, r * 0.42, 'rgba(255,255,255,0.85)', 2);
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) { const a = i / 4 * Math.PI * 2 + Math.PI / 4; ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + Math.cos(a) * r * 0.62, b.y + Math.sin(a) * r * 0.62); }
+      ctx.stroke();
     }
   }
   function drawBuilding(ctx, b) {
@@ -144,13 +188,18 @@ window.BW = window.BW || {};
     if (b.hp < b.maxHp) bar(ctx, b.x, b.y - r * (isBase ? 1 : 0.85) - 12, r * 2, 6, b.hp / b.maxHp);
   }
 
-  /* ---- ants ------------------------------------------------------------ */
+  /* ---- bugs (per-faction body styles) ----------------------------------
+     style comes from FACTIONS[faction].style: ant | bee | beetle | spider.
+     Only the bee STYLE hovers visually; flying:true units (hornet, balloonist)
+     elevate higher — and actually ignore walls (systems.js).                 */
   function drawAnt(ctx, u, time) {
     const s = cfg.UNIT_STATS[u.kind], r = s.radius * 1.2, tint = tintOf(u.team);
-    const bee = BW.state.faction && BW.state.faction[u.team] === 'bees';
-    const flying = s.flying;                              // true flyer (hornet) — also ignores walls (systems.js)
-    const airborne = flying || bee;                      // ALL bees hover — VISUAL ONLY, no balance change
-    const lift = flying ? r * 1.0 : (bee ? r * 0.55 : 0); // how high off the ground it's drawn
+    const style = (BW.state.faction && cfg.FACTIONS[BW.state.faction[u.team]].style) || 'ant';
+    const bee = style === 'bee', beetle = style === 'beetle', spider = style === 'spider';
+    const flying = s.flying;                              // true flyer — also ignores walls (systems.js)
+    const airborne = flying || bee;                       // bees hover visually; others walk
+    const lift = flying ? r * 1.0 : (bee ? r * 0.55 : 0);
+    const abdomenX = beetle ? -0.55 : spider ? -0.6 : -0.72;   // where the rear segment sits
 
     if (airborne) {                                       // ground shadow under anything off the ground
       ctx.fillStyle = 'rgba(0,0,0,0.20)';
@@ -163,36 +212,65 @@ window.BW = window.BW || {};
 
     if (!airborne) {                                      // walking legs (grounded units only)
       ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.16); ctx.lineCap = 'round';
-      const ph = time * 9 + u.id * 1.7;
-      for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
-        const lx = (-0.15 + i * 0.42) * r, sw = Math.sin(ph + i) * 0.18 * side;
-        ctx.beginPath(); ctx.moveTo(lx, side * r * 0.22); ctx.quadraticCurveTo(lx + 0.25 * r, side * r * 0.95, lx + (0.2 + sw) * r * 1.6, side * r * 1.15); ctx.stroke();
+      const ph = time * (beetle ? 6 : 9) + u.id * 1.7;    // beetles lumber
+      const legN = spider ? 4 : 3;                        // spiders get 8 legs
+      for (const side of [-1, 1]) for (let i = 0; i < legN; i++) {
+        const lx = (-0.3 + i * (spider ? 0.34 : 0.42)) * r, sw = Math.sin(ph + i) * 0.18 * side;
+        ctx.beginPath(); ctx.moveTo(lx, side * r * 0.22); ctx.quadraticCurveTo(lx + 0.25 * r, side * r * 0.95, lx + (0.2 + sw) * r * 1.6, side * r * (spider ? 1.3 : 1.15)); ctx.stroke();
       }
     }
     if (bee) {                                            // beating wings
-      const wf = Math.sin(time * (flying ? 40 : 32) + u.id) * 0.4;   // lively hover for all bees
+      const wf = Math.sin(time * (flying ? 40 : 32) + u.id) * 0.4;
       ctx.fillStyle = 'rgba(225,238,255,0.45)'; ctx.strokeStyle = 'rgba(200,222,255,0.65)'; ctx.lineWidth = 1;
       for (const side of [-1, 1]) {
         ctx.save(); ctx.translate(0, side * 0.32 * r); ctx.rotate(side * (0.55 + wf));
         ctx.beginPath(); ctx.ellipse(-0.35 * r, 0, 0.62 * r, 0.26 * r, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
       }
     }
-    // antennae
-    ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.14); ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(r * 0.95, -r * 0.18); ctx.lineTo(r * 1.6, -r * 0.5); ctx.moveTo(r * 0.95, r * 0.18); ctx.lineTo(r * 1.6, r * 0.5); ctx.stroke();
+    if (spider && flying) {                               // balloonist: silk threads catching the wind
+      ctx.strokeStyle = 'rgba(225,235,255,0.6)'; ctx.lineWidth = 1;
+      const sway = Math.sin(time * 7 + u.id) * 0.2;
+      for (const a of [-0.5, 0, 0.5]) {
+        ctx.beginPath(); ctx.moveTo(-0.3 * r, 0);
+        ctx.quadraticCurveTo(-1.2 * r, (a + sway) * r * 1.6, -2.1 * r, (a + sway) * r * 2.6); ctx.stroke();
+      }
+    }
+    if (!spider) {                                        // antennae (spiders have none)
+      ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.14); ctx.lineCap = 'round';
+      const al = beetle ? 1.25 : 1.6;                     // beetles: short, clubbed
+      ctx.beginPath(); ctx.moveTo(r * 0.95, -r * 0.18); ctx.lineTo(r * al, -r * 0.45); ctx.moveTo(r * 0.95, r * 0.18); ctx.lineTo(r * al, r * 0.45); ctx.stroke();
+    }
     // body
     ctx.fillStyle = s.color;
-    fillEllipse(ctx, -0.72 * r, 0, 0.8 * r, 0.6 * r); fillEllipse(ctx, 0.05 * r, 0, 0.46 * r, 0.42 * r); fillEllipse(ctx, 0.78 * r, 0, 0.5 * r, 0.46 * r);
+    if (beetle) {                                         // dome + pronotum + head
+      fillEllipse(ctx, abdomenX * r, 0, 1.0 * r, 0.74 * r);
+      fillEllipse(ctx, 0.35 * r, 0, 0.4 * r, 0.46 * r);
+      fillEllipse(ctx, 0.85 * r, 0, 0.36 * r, 0.34 * r);
+      ctx.strokeStyle = 'rgba(20,14,8,0.65)'; ctx.lineWidth = Math.max(1, r * 0.12);   // elytra split
+      ctx.beginPath(); ctx.moveTo(0.25 * r, 0); ctx.lineTo((abdomenX - 0.95) * r, 0); ctx.stroke();
+    } else if (spider) {                                  // big abdomen + cephalothorax
+      fillEllipse(ctx, abdomenX * r, 0, 0.9 * r, 0.72 * r);
+      fillEllipse(ctx, 0.42 * r, 0, 0.52 * r, 0.46 * r);
+      ctx.fillStyle = shade(s.color, -50);                // abdomen marking
+      fillEllipse(ctx, abdomenX * r, 0, 0.34 * r, 0.5 * r);
+      ctx.fillStyle = s.color;
+    } else {                                              // ant / bee: classic 3 segments
+      fillEllipse(ctx, abdomenX * r, 0, 0.8 * r, 0.6 * r);
+      fillEllipse(ctx, 0.05 * r, 0, 0.46 * r, 0.42 * r);
+      fillEllipse(ctx, 0.78 * r, 0, 0.5 * r, 0.46 * r);
+    }
     if (bee) {                                            // black stripes on the abdomen
       ctx.save();
-      ctx.beginPath(); ctx.ellipse(-0.72 * r, 0, 0.8 * r, 0.6 * r, 0, 0, Math.PI * 2); ctx.clip();
+      ctx.beginPath(); ctx.ellipse(abdomenX * r, 0, 0.8 * r, 0.6 * r, 0, 0, Math.PI * 2); ctx.clip();
       ctx.fillStyle = 'rgba(26,18,6,0.9)';
       for (const dx of [-1.05, -0.7, -0.35]) fillEllipse(ctx, dx * r, 0, 0.1 * r, 0.7 * r);
       ctx.restore();
     }
-    if (u.venomTimer > 0) { ctx.fillStyle = 'rgba(124,255,107,0.35)'; fillEllipse(ctx, -0.72 * r, 0, 0.88 * r, 0.66 * r); }
-    ctx.strokeStyle = tint; ctx.lineWidth = Math.max(1.4, r * 0.24); ctx.beginPath(); ctx.ellipse(0.05 * r, 0, 0.5 * r, 0.46 * r, 0, 0, Math.PI * 2); ctx.stroke();
-    if (u.carrying > 0 && u.carryType) { ctx.fillStyle = cfg.resources[u.carryType].color; fillEllipse(ctx, -1.3 * r, 0, r * 0.34, r * 0.34); }
+    if (u.venomTimer > 0) { ctx.fillStyle = 'rgba(124,255,107,0.35)'; fillEllipse(ctx, abdomenX * r, 0, 0.95 * r, 0.7 * r); }
+    // team-color band on the midsection — readable at a glance on a big map
+    ctx.strokeStyle = tint; ctx.lineWidth = Math.max(1.4, r * 0.24);
+    ctx.beginPath(); ctx.ellipse((beetle ? 0.35 : spider ? 0.42 : 0.05) * r, 0, 0.5 * r, 0.46 * r, 0, 0, Math.PI * 2); ctx.stroke();
+    if (u.carrying > 0 && u.carryType) { ctx.fillStyle = cfg.resources[u.carryType].color; fillEllipse(ctx, -1.4 * r, 0, r * 0.34, r * 0.34); }
     ctx.restore();
   }
 
@@ -242,7 +320,9 @@ window.BW = window.BW || {};
       if (!s.selected.size) selEl.textContent = 'drag a box to select · double-click a unit for all of its type';
       else {
         const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
-                        drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet' };
+                        drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet',
+                        grub: 'Grub', bruiser: 'Bruiser', bombardier: 'Bombardier', ram: 'Ram Beetle',
+                        spiderling: 'Spiderling', hunter: 'Hunter', spitter: 'Spitter', weaver: 'Weaver', balloonist: 'Balloonist' };
         const counts = {};
         for (const id of s.selected) { const u = BW.byId(id); if (u) counts[u.kind] = (counts[u.kind] || 0) + 1; }
         selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + names[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ');
@@ -297,18 +377,64 @@ window.BW = window.BW || {};
     ctx.restore();
   }
 
+  /* ---- minimap (AoE-style, bottom-right) -------------------------------- */
+  function drawMinimap(ctx) {
+    const s = BW.state, m = BW.minimapRect();
+    const sx = m.w / cfg.world.width, sy = m.h / cfg.world.height;
+    ctx.save();
+    ctx.fillStyle = 'rgba(16,26,18,0.88)';
+    ctx.fillRect(m.x - 2, m.y - 2, m.w + 4, m.h + 4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+    ctx.strokeRect(m.x - 2, m.y - 2, m.w + 4, m.h + 4);
+    for (const o of s.obstacles) {                                     // terrain
+      ctx.fillStyle = 'rgba(130,138,150,0.5)';
+      ctx.fillRect(m.x + o.x * sx - 1.5, m.y + o.y * sy - 1.5, 3, 3);
+    }
+    for (const n of s.nodes) {                                         // resources
+      if (n.amount <= 1) continue;
+      ctx.fillStyle = (cfg.resources[n.resource] && cfg.resources[n.resource].color) || '#888';
+      ctx.fillRect(m.x + n.x * sx - 1, m.y + n.y * sy - 1, 2, 2);
+    }
+    for (const b of s.buildings) {                                     // buildings (bigger dots)
+      const isBase = cfg.BUILDING_STATS[b.kind].category === 'nest';
+      ctx.fillStyle = tintOf(b.team);
+      const d = isBase ? 5 : 3;
+      ctx.fillRect(m.x + b.x * sx - d / 2, m.y + b.y * sy - d / 2, d, d);
+    }
+    for (const u of s.units) {                                         // units
+      ctx.fillStyle = tintOf(u.team);
+      ctx.fillRect(m.x + u.x * sx - 1, m.y + u.y * sy - 1, 2, 2);
+    }
+    for (const a of s.alerts) {                                        // attack alert blink
+      if (a.type !== 'incoming' || a.x == null) continue;
+      if (Math.sin(s.time * 10) > 0) { ctx.fillStyle = C.alert; ctx.fillRect(m.x + a.x * sx - 3, m.y + a.y * sy - 3, 6, 6); }
+    }
+    // camera viewport rectangle
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1;
+    ctx.strokeRect(m.x + s.camera.x * sx, m.y + s.camera.y * sy, cfg.view.width * sx, cfg.view.height * sy);
+    ctx.restore();
+  }
+
   function render(ctx) {
-    const s = BW.state;
-    drawBackground(ctx);
-    s.nodes.forEach(n => drawNode(ctx, n));
-    s.obstacles.forEach(o => drawRock(ctx, o));
-    s.buildings.forEach(b => drawBuilding(ctx, b));
+    const s = BW.state, cam = s.camera || { x: 0, y: 0 };
+    const cx = Math.round(cam.x), cy = Math.round(cam.y);              // integer offsets = crisp pixels
+    const vis = (e, m) => e.x > cx - m && e.x < cx + cfg.view.width + m && e.y > cy - m && e.y < cy + cfg.view.height + m;
+
+    ctx.save();
+    ctx.translate(-cx, -cy);                                           // world → screen
+    drawBackground(ctx, { x: cx, y: cy });
+    for (const n of s.nodes) if (vis(n, 40)) drawNode(ctx, n);
+    for (const o of s.obstacles) if (vis(o, 80)) drawRock(ctx, o);
+    for (const b of s.buildings) if (vis(b, 160)) drawBuilding(ctx, b);
     for (const id of s.selected) { const u = BW.byId(id); if (u) ring(ctx, u.x, u.y, ER(u) + 5, C.selection, 2); }
     drawRally(ctx);
-    for (const u of s.units) drawAnt(ctx, u, s.time);
-    for (const u of s.units) if (u.hp < u.maxHp) bar(ctx, u.x, u.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
+    for (const u of s.units) if (vis(u, 40)) drawAnt(ctx, u, s.time);
+    for (const u of s.units) if (u.hp < u.maxHp && vis(u, 40)) bar(ctx, u.x, u.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
     drawAlerts(ctx); drawPings(ctx); drawGhost(ctx);
     if (s.drag) drawDrag(ctx, s.drag);
+    ctx.restore();
+
+    if (s.phase !== 'menu') drawMinimap(ctx);                          // screen-space HUD
     updateHUD(); updateOverlay();
   }
 

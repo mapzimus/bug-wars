@@ -142,7 +142,11 @@ window.BW = window.BW || {};
      ------------------------------------------------------------------ */
   function applyDamage(target, base, attacker) {
     const aCls = classOf(attacker), tCls = classOf(target);
-    const mult = (cfg.COUNTERS[aCls] && cfg.COUNTERS[aCls][tCls]) || 1;
+    let mult = (cfg.COUNTERS[aCls] && cfg.COUNTERS[aCls][tCls]) || 1;
+    // Walls are fortifications: non-siege attackers barely scratch them.
+    // Crack them with siege (which keeps its 4x building bonus) or fly over.
+    const tb = cfg.BUILDING_STATS[target.kind];
+    if (tb && tb.blocks && aCls !== 'siege') mult *= cfg.wallResist;
     target.hp -= base * mult;
   }
   function strike(attacker, target) {
@@ -279,7 +283,7 @@ window.BW = window.BW || {};
     if (!b.rally) return;
     const isG = u.kind === gathererKind(b.team);
     const node = b.rally.nodeId != null ? BW.byId(b.rally.nodeId) : null;
-    if (isG && node && node.kind === 'node') u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
+    if (isG && node && node.kind === 'node' && node.amount > 0) u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id };
     else u.order = { type: isG ? 'move' : 'attackMove', tx: b.rally.x, ty: b.rally.y, targetId: null };
   }
 
@@ -334,7 +338,8 @@ window.BW = window.BW || {};
     const stat = cfg.UNIT_STATS[kind];
     const producer = producerFor(kind, team);
     if (!producer) {
-      const tn = stat.trainedAt, where = tn === 'nest' || tn === 'hive' ? 'a base' : 'a ' + tn.charAt(0).toUpperCase() + tn.slice(1);
+      const tn = stat.trainedAt;
+      const where = cfg.BUILDING_STATS[tn].category === 'nest' ? 'a base' : 'a ' + tn.charAt(0).toUpperCase() + tn.slice(1);
       return { ok: false, reason: `Build ${where} first` };
     }
     if (countUnits(team) + queued(team) >= cfg.popCap) return { ok: false, reason: 'Population cap reached' };

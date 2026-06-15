@@ -16,14 +16,22 @@ window.BW = window.BW || {};
   const NAMES = {
     worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
     drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet',
+    grub: 'Grub', bruiser: 'Bruiser', bombardier: 'Bombardier', ram: 'Ram Beetle',
+    spiderling: 'Spiderling', hunter: 'Hunter', spitter: 'Spitter', weaver: 'Weaver', balloonist: 'Balloonist',
     barracks: 'Barracks', workshop: 'Workshop', granary: 'Granary', tower: 'Tower', wall: 'Wall',
     hive: 'Hive', brood: 'Brood', apiary: 'Apiary',
+    mound: 'Mound', den: 'Den', burrow: 'Burrow',
+    lair: 'Lair', nursery: 'Nursery', spinnery: 'Spinnery',
   };
   const DESC = {
-    worker: 'gathers resources', soldier: 'tanky · beats skirmishers', fireant: 'fast · venom · anti-air & siege', leafcutter: 'siege · wrecks buildings',
-    drone: 'gathers resources', guard: 'tanky frontline', striker: 'fast · venom · anti-air & siege', carpenter: 'siege · wrecks buildings', hornet: 'flyer · raids · ignores walls',
-    barracks: 'makes soldiers / fire ants', workshop: 'makes leafcutters', granary: 'closer drop-off', tower: 'shoots attackers (+ flyers)', wall: 'blocks a path',
+    worker: 'gathers resources', soldier: 'tanky · beats skirmishers', fireant: 'fast · venom · anti-air & siege', leafcutter: 'siege · wrecks buildings & walls',
+    drone: 'gathers resources', guard: 'tanky frontline', striker: 'fast · venom · anti-air & siege', carpenter: 'siege · wrecks buildings & walls', hornet: 'flyer · raids · ignores walls',
+    grub: 'gathers resources', bruiser: 'slow heavy tank', bombardier: 'acid spit · anti-air & siege', ram: 'siege · cracks walls & buildings',
+    spiderling: 'gathers resources', hunter: 'agile frontline', spitter: 'venom · anti-air & siege', weaver: 'siege · wrecks buildings & walls', balloonist: 'flyer · drifts over walls',
+    barracks: 'makes soldiers / fire ants', workshop: 'makes leafcutters', granary: 'closer drop-off', tower: 'shoots attackers (+ flyers)', wall: 'tough barrier · only siege cracks it',
     brood: 'makes guards / strikers', apiary: 'makes carpenters + hornets',
+    den: 'makes bruisers / bombardiers', burrow: 'makes rams',
+    nursery: 'makes hunters / spitters', spinnery: 'makes weavers + balloonists',
   };
   const ICON = { food: '🍞', mud: '🟫', honeydew: '🍯' };
   const costStr = cost => Object.keys(cost).map(k => ICON[k] + ' ' + cost[k]).join(' ') || '—';
@@ -53,7 +61,7 @@ window.BW = window.BW || {};
   // Faction-aware tutorial (works for ants or bees).
   const pf = () => (BW.state && BW.state.faction) ? BW.state.faction.player : 'ants';
   const STEPS = [
-    { text: "Drag a box over your gatherers, then RIGHT-CLICK a Food pile (green) to mine it — they keep at it until you move them.",
+    { text: "Drag a box over your gatherers, then RIGHT-CLICK a Food pile (green) to mine it. Scroll the map with WASD / arrows / screen edges — or click the minimap.",
       done: s => s.units.some(u => u.team === 'player' && u.kind === cfg.FACTIONS[pf()].gatherer && (u.order.type === 'gather' || u.order.type === 'returning')) },
     { text: "You need MUD (brown) to build. With ~120 mud, click your production building below and place it near your base.",
       done: s => s.buildings.some(b => b.team === 'player' && b.kind === cfg.FACTIONS[pf()].producers[0]) },
