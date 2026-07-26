@@ -1,8 +1,13 @@
 /* ============================================================================
-   Bug Wars — main.js   (v2)
+   Bug Wars — main.js   (v5)
    ----------------------------------------------------------------------------
    Entry point + fixed-timestep loop. Phases: 'menu' (start screen, sim paused),
    'playing', 'won', 'lost'. The loop only advances the sim while 'playing'.
+
+   v5: the canvas is RESPONSIVE. v4 locked it to 1280x720 and letterboxed, which
+   on a big monitor meant playing an RTS through a mail slot. The canvas now
+   fills its container and cfg.view tracks it, in CSS pixels; the drawing
+   context is pre-scaled by devicePixelRatio so the result stays crisp.
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -10,7 +15,38 @@ window.BW = window.BW || {};
 (function () {
   const cfg = BW.config;
   const STEP = 1000 / 60;
-  let canvas, ctx, last = 0, acc = 0, running = false;
+  let canvas, ctx, last = 0, acc = 0, running = false, dpr = 1;
+
+  /* ---- responsive sizing ------------------------------------------------ */
+  function resize() {
+    if (!canvas) return;
+    const host = canvas.parentElement;
+    const cssW = Math.max(320, Math.floor(host.clientWidth));
+    const cssH = Math.max(240, Math.floor(host.clientHeight));
+    dpr = Math.min(2, window.devicePixelRatio || 1);      // cap at 2 — 3x costs a lot for little gain
+
+    cfg.view.width = cssW; cfg.view.height = cssH;
+    canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+
+    if (BW.state && BW.state.camera && BW.clampCamera) BW.clampCamera();
+  }
+
+  // Watch the STAGE BOX, not just the window. The footer changes height when
+  // ui.buildPanel() swaps in a faction's build/train/research rows, which
+  // shrinks the stage without any window resize event — measuring only on
+  // window resize left the canvas overflowing and clipped its bottom strip
+  // (taking the minimap with it).
+  function observeStage(host) {
+    if (typeof ResizeObserver === 'undefined') return;
+    let pending = false;
+    const ro = new ResizeObserver(() => {
+      if (pending) return;                       // coalesce: one resize per frame at most
+      pending = true;
+      requestAnimationFrame(() => { pending = false; resize(); });
+    });
+    ro.observe(host);
+  }
 
   function frame(now) {
     if (!last) last = now;
@@ -25,7 +61,9 @@ window.BW = window.BW || {};
     }
     // Camera pans on REAL time (works while paused, ignores gameSpeed).
     if (BW.input && BW.input.updateCamera) BW.input.updateCamera(delta / 1000);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);        // CSS-pixel coordinate space
+    ctx.clearRect(0, 0, cfg.view.width, cfg.view.height);
     BW.render(ctx);
     if (BW.ui) BW.ui.tick();
     requestAnimationFrame(frame);
@@ -34,11 +72,10 @@ window.BW = window.BW || {};
   BW.togglePause = function () { if (BW.state.phase === 'playing') BW.state.paused = !BW.state.paused; };
 
   /* ---- live game-speed control ---------------------------------------
-     The loop reads cfg.gameSpeed fresh each frame, so changing it here
-     takes effect instantly. SPEEDS is the ladder the −/+ buttons & [ ] keys
-     step through; default (config.js) lands on 0.6×. */
-  const SPEEDS = [0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.25];
-  function fmtSpeed(m) { return (+m.toFixed(2)) + '×'; }   // 0.60 -> "0.6×", 1.00 -> "1×"
+     The loop reads cfg.gameSpeed fresh each frame, so changing it here takes
+     effect instantly. v5 recentres the ladder on 1x (v4 defaulted to 0.6x). */
+  const SPEEDS = [0.5, 0.7, 0.85, 1.0, 1.25, 1.5, 2.0];
+  function fmtSpeed(m) { return (+m.toFixed(2)) + '×'; }
   function syncSpeedLabel() { const el = document.getElementById('speedVal'); if (el) el.textContent = fmtSpeed(cfg.gameSpeed); }
   BW.setGameSpeed = function (m) {
     cfg.gameSpeed = Math.max(SPEEDS[0], Math.min(SPEEDS[SPEEDS.length - 1], m));
@@ -74,11 +111,13 @@ window.BW = window.BW || {};
   function start() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
-    canvas.width = cfg.view.width; canvas.height = cfg.view.height;   // the camera window, NOT the world
     BW.canvas = canvas;
+    resize();
+    window.addEventListener('resize', resize);
+    observeStage(canvas.parentElement);
     BW.world.initWorld('normal');
     BW.state.phase = 'menu';                        // board sits behind the menu
-    syncSpeedLabel();                               // show the starting speed (0.6×)
+    syncSpeedLabel();
     BW.input.attach(canvas);
     if (!running) { running = true; requestAnimationFrame(frame); }
   }

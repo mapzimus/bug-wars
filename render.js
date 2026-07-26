@@ -1,9 +1,13 @@
 /* ============================================================================
-   Bug Wars — render.js   (v2)
+   Bug Wars — render.js   (v5)
    ----------------------------------------------------------------------------
-   All drawing, and ONLY drawing — reads BW.state, never mutates it. v2 adds
-   typed resource nodes, the five building types, the build-placement ghost,
-   attack-warning pulses, and a three-resource HUD with a clock.
+   All drawing, and ONLY drawing — reads BW.state, never mutates it.
+
+   v5 adds:
+     · a ZOOMED camera transform (screen = (world - cam) * zoom)
+     · the COMBAT FX layer — tracers, hit sparks, floating damage, death puffs.
+       The simulation emits these into state.fx; this file just draws them.
+     · an army-strength comparison + research progress in the HUD
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -31,15 +35,17 @@ window.BW = window.BW || {};
     ctx.fillStyle = frac > 0.4 ? C.hpGood : C.hpBad; ctx.fillRect(x, topY, w * Math.max(0, frac), h);
   }
   const tintOf = team => team === 'player' ? C.playerTint : C.enemyTint;
+  const zoom = () => (BW.state.camera && BW.state.camera.zoom) || 1;
 
   /* ---- background (rendered ONCE to an offscreen canvas) ---------------
-     The world is 4x the screen now; re-stroking a thousand grass blades per
-     frame would hurt. Paint the terrain once, then blit the visible slice. */
-  let decorCanvas = null;
+     Re-stroking a thousand grass blades per frame would hurt. Paint the terrain
+     once at world size, then blit the visible slice. */
+  let decorCanvas = null, decorFor = null;
   function buildDecor() {
     const W = cfg.world.width, H = cfg.world.height;
     decorCanvas = document.createElement('canvas');
     decorCanvas.width = W; decorCanvas.height = H;
+    decorFor = W + 'x' + H;
     const g = decorCanvas.getContext('2d');
     g.fillStyle = C.grass; g.fillRect(0, 0, W, H);
     g.fillStyle = C.grassPatch;                                       // mottled grass
@@ -65,33 +71,33 @@ window.BW = window.BW || {};
       g.fillStyle = '#e9c46a'; g.beginPath(); g.ellipse(x, y, r * 0.55, r * 0.55, 0, 0, Math.PI * 2); g.fill();
     }
   }
-  function drawBackground(ctx, cam) {
-    if (!decorCanvas) buildDecor();
-    const v = cfg.view;
-    // blit only the visible slice of the pre-rendered world
-    ctx.drawImage(decorCanvas, cam.x, cam.y, v.width, v.height, cam.x, cam.y, v.width, v.height);
+  function drawBackground(ctx, cam, vw, vh) {
+    if (!decorCanvas || decorFor !== cfg.world.width + 'x' + cfg.world.height) buildDecor();
+    const w = Math.min(vw, cfg.world.width - cam.x), h = Math.min(vh, cfg.world.height - cam.y);
+    if (w <= 0 || h <= 0) return;
+    ctx.drawImage(decorCanvas, cam.x, cam.y, w, h, cam.x, cam.y, w, h);
   }
 
   /* ---- nodes / rocks --------------------------------------------------- */
   function drawNode(ctx, n) {
     const def = cfg.resources[n.resource], r = def.radius, max = n.max || def.amount;
     const frac = Math.max(0, Math.min(1, n.amount / max)), k = Math.max(0.45, frac);
-    // depletion ring (how much is left)
     ctx.strokeStyle = 'rgba(0,0,0,0.30)'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(n.x, n.y, r + 5, 0, Math.PI * 2); ctx.stroke();
     ctx.strokeStyle = def.color; ctx.lineWidth = 3; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.arc(n.x, n.y, r + 5, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
     ctx.lineCap = 'butt';
-    // the pile (shrinks as it depletes)
     ctx.fillStyle = def.color;
     for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; fillEllipse(ctx, n.x + Math.cos(a) * r * 0.5, n.y + Math.sin(a) * r * 0.5, r * 0.45 * k + 1, r * 0.4 * k + 1); }
     ctx.fillStyle = shade(def.color, -45); fillEllipse(ctx, n.x, n.y, r * 0.4 * k + 1, r * 0.36 * k + 1);
-    // remaining value
-    ctx.font = '600 11px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const label = Math.ceil(n.amount);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(label, n.x, n.y - r - 11);
-    ctx.fillStyle = '#fff'; ctx.fillText(label, n.x, n.y - r - 12);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    if (zoom() > 0.62) {                                    // hide clutter when zoomed way out
+      const fs = Math.max(9, 11 / zoom());
+      ctx.font = `600 ${fs}px "JetBrains Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const label = Math.ceil(n.amount);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(label, n.x, n.y - r - 11);
+      ctx.fillStyle = '#fff'; ctx.fillText(label, n.x, n.y - r - 12);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
   }
   function drawRock(ctx, o) {
     ctx.fillStyle = shade(C.obstacle, -18); fillEllipse(ctx, o.x, o.y + o.r * 0.18, o.r, o.r * 0.85);
@@ -106,7 +112,7 @@ window.BW = window.BW || {};
     ctx.closePath();
   }
   function drawNestMound(ctx, b, tint, r) {
-    const base = cfg.BUILDING_STATS[b.kind].color;     // ant nest brown, bee hive amber
+    const base = cfg.BUILDING_STATS[b.kind].color;
     for (let i = 0; i < 4; i++) { ctx.fillStyle = shade(base, i * 9); ctx.beginPath(); ctx.arc(b.x, b.y, r * (1 - i * 0.18), 0, Math.PI * 2); ctx.fill(); }
     ctx.fillStyle = '#1b120b'; ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.22, 0, Math.PI * 2); ctx.fill();
     if (b.kind === 'hive') {                            // honeycomb cells
@@ -126,33 +132,33 @@ window.BW = window.BW || {};
   }
   function drawGlyph(ctx, b, r) {
     ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    if (b.kind === 'barracks') {                 // crossed blades
+    if (b.kind === 'barracks') {
       ctx.beginPath(); ctx.moveTo(b.x - r * 0.4, b.y + r * 0.4); ctx.lineTo(b.x + r * 0.4, b.y - r * 0.4);
       ctx.moveTo(b.x + r * 0.4, b.y + r * 0.4); ctx.lineTo(b.x - r * 0.4, b.y - r * 0.4); ctx.stroke();
-    } else if (b.kind === 'workshop') {          // gear
+    } else if (b.kind === 'workshop') {
       ring(ctx, b.x, b.y, r * 0.42, 'rgba(255,255,255,0.85)', 2);
       for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(b.x + Math.cos(a) * r * 0.42, b.y + Math.sin(a) * r * 0.42); ctx.lineTo(b.x + Math.cos(a) * r * 0.62, b.y + Math.sin(a) * r * 0.62); ctx.stroke(); }
-    } else if (b.kind === 'granary') {           // dome
+    } else if (b.kind === 'granary') {
       ctx.beginPath(); ctx.arc(b.x, b.y + r * 0.2, r * 0.5, Math.PI, 0); ctx.stroke();
-    } else if (b.kind === 'tower') {             // turret + faint range
+    } else if (b.kind === 'tower') {
       ctx.beginPath(); ctx.arc(b.x, b.y - r * 0.1, r * 0.45, 0, Math.PI * 2); ctx.fill();
       ring(ctx, b.x, b.y, cfg.BUILDING_STATS.tower.range, 'rgba(255,255,255,0.07)', 1);
-    } else if (b.kind === 'wall') {              // bricks
+    } else if (b.kind === 'wall') {
       ctx.beginPath(); ctx.moveTo(b.x - r * 0.6, b.y); ctx.lineTo(b.x + r * 0.6, b.y);
       ctx.moveTo(b.x, b.y - r * 0.5); ctx.lineTo(b.x, b.y + r * 0.5); ctx.stroke();
-    } else if (b.kind === 'brood') {             // honeycomb cell
+    } else if (b.kind === 'brood') {
       hexAt(ctx, b.x, b.y, r * 0.5); ctx.stroke();
-    } else if (b.kind === 'apiary') {            // honeycomb + core (siege/hornet hub)
+    } else if (b.kind === 'apiary') {
       hexAt(ctx, b.x, b.y, r * 0.5); ctx.stroke();
       ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.16, 0, Math.PI * 2); ctx.fill();
-    } else if (b.kind === 'den') {               // beetle den: twin studs
+    } else if (b.kind === 'den') {
       ctx.beginPath(); ctx.arc(b.x - r * 0.28, b.y, r * 0.18, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(b.x + r * 0.28, b.y, r * 0.18, 0, Math.PI * 2); ctx.fill();
-    } else if (b.kind === 'burrow') {            // beetle burrow: ram wedge
+    } else if (b.kind === 'burrow') {
       ctx.beginPath(); ctx.moveTo(b.x - r * 0.45, b.y + r * 0.35); ctx.lineTo(b.x, b.y - r * 0.45); ctx.lineTo(b.x + r * 0.45, b.y + r * 0.35); ctx.closePath(); ctx.stroke();
-    } else if (b.kind === 'nursery') {           // spider nursery: egg cluster
+    } else if (b.kind === 'nursery') {
       for (const [ex, ey] of [[-0.3, -0.15], [0.3, -0.15], [0, 0.3]]) { ctx.beginPath(); ctx.arc(b.x + ex * r, b.y + ey * r, r * 0.17, 0, Math.PI * 2); ctx.fill(); }
-    } else if (b.kind === 'spinnery') {          // spider spinnery: web cross
+    } else if (b.kind === 'spinnery') {
       ring(ctx, b.x, b.y, r * 0.42, 'rgba(255,255,255,0.85)', 2);
       ctx.beginPath();
       for (let i = 0; i < 4; i++) { const a = i / 4 * Math.PI * 2 + Math.PI / 4; ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + Math.cos(a) * r * 0.62, b.y + Math.sin(a) * r * 0.62); }
@@ -168,9 +174,9 @@ window.BW = window.BW || {};
       ctx.strokeStyle = tint; ctx.lineWidth = 2.5; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, false);
       drawGlyph(ctx, b, r);
     }
-    // training progress ring + queue badge (the unit-creation countdown)
+    // training progress ring + queue badge
     if (b.trainQueue && b.trainQueue.length) {
-      const total = cfg.UNIT_STATS[b.trainQueue[0]].buildTime;
+      const total = BW.systems.buildTimeOf(b.trainQueue[0], b.team);
       const prog = Math.max(0, Math.min(1, 1 - b.trainTimer / total));
       const rr = r + 9;
       ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 4;
@@ -185,35 +191,44 @@ window.BW = window.BW || {};
         ctx.fillText(b.trainQueue.length, bx, by); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       }
     }
+    // research beaker ring — a second, distinct arc so you can tell at a glance
+    // whether a building is making units or making progress.
+    const rs = BW.state.research[b.team];
+    if (rs && rs.buildingId === b.id) {
+      const prog = Math.max(0, Math.min(1, 1 - rs.timeLeft / rs.total));
+      const rr = r + 15;
+      ctx.strokeStyle = 'rgba(0,0,0,0.30)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(b.x, b.y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(b.x, b.y, rr, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2); ctx.stroke();
+      ctx.lineCap = 'butt';
+    }
     if (b.hp < b.maxHp) bar(ctx, b.x, b.y - r * (isBase ? 1 : 0.85) - 12, r * 2, 6, b.hp / b.maxHp);
   }
 
-  /* ---- bugs (per-faction body styles) ----------------------------------
-     style comes from FACTIONS[faction].style: ant | bee | beetle | spider.
-     Only the bee STYLE hovers visually; flying:true units (hornet, balloonist)
-     elevate higher — and actually ignore walls (systems.js).                 */
+  /* ---- bugs (per-faction body styles) ---------------------------------- */
   function drawAnt(ctx, u, time) {
     const s = cfg.UNIT_STATS[u.kind], r = s.radius * 1.2, tint = tintOf(u.team);
     const style = (BW.state.faction && cfg.FACTIONS[BW.state.faction[u.team]].style) || 'ant';
     const bee = style === 'bee', beetle = style === 'beetle', spider = style === 'spider';
-    const flying = s.flying;                              // true flyer — also ignores walls (systems.js)
-    const airborne = flying || bee;                       // bees hover visually; others walk
+    const flying = s.flying;
+    const airborne = flying || bee;
     const lift = flying ? r * 1.0 : (bee ? r * 0.55 : 0);
-    const abdomenX = beetle ? -0.55 : spider ? -0.6 : -0.72;   // where the rear segment sits
+    const abdomenX = beetle ? -0.55 : spider ? -0.6 : -0.72;
 
-    if (airborne) {                                       // ground shadow under anything off the ground
+    if (airborne) {
       ctx.fillStyle = 'rgba(0,0,0,0.20)';
       fillEllipse(ctx, u.x, u.y + r * 1.2, r * (flying ? 0.9 : 0.78), r * 0.36);
     }
 
     ctx.save();
-    ctx.translate(u.x, u.y - lift);                       // elevate flyers / hovering bees
+    ctx.translate(u.x, u.y - lift);
     ctx.rotate(u.heading);
 
-    if (!airborne) {                                      // walking legs (grounded units only)
+    if (!airborne) {                                      // walking legs
       ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.16); ctx.lineCap = 'round';
-      const ph = time * (beetle ? 6 : 9) + u.id * 1.7;    // beetles lumber
-      const legN = spider ? 4 : 3;                        // spiders get 8 legs
+      const ph = time * (beetle ? 6 : 9) + u.id * 1.7;
+      const legN = spider ? 4 : 3;
       for (const side of [-1, 1]) for (let i = 0; i < legN; i++) {
         const lx = (-0.3 + i * (spider ? 0.34 : 0.42)) * r, sw = Math.sin(ph + i) * 0.18 * side;
         ctx.beginPath(); ctx.moveTo(lx, side * r * 0.22); ctx.quadraticCurveTo(lx + 0.25 * r, side * r * 0.95, lx + (0.2 + sw) * r * 1.6, side * r * (spider ? 1.3 : 1.15)); ctx.stroke();
@@ -227,7 +242,7 @@ window.BW = window.BW || {};
         ctx.beginPath(); ctx.ellipse(-0.35 * r, 0, 0.62 * r, 0.26 * r, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
       }
     }
-    if (spider && flying) {                               // balloonist: silk threads catching the wind
+    if (spider && flying) {                               // balloonist silk threads
       ctx.strokeStyle = 'rgba(225,235,255,0.6)'; ctx.lineWidth = 1;
       const sway = Math.sin(time * 7 + u.id) * 0.2;
       for (const a of [-0.5, 0, 0.5]) {
@@ -235,31 +250,30 @@ window.BW = window.BW || {};
         ctx.quadraticCurveTo(-1.2 * r, (a + sway) * r * 1.6, -2.1 * r, (a + sway) * r * 2.6); ctx.stroke();
       }
     }
-    if (!spider) {                                        // antennae (spiders have none)
+    if (!spider) {                                        // antennae
       ctx.strokeStyle = 'rgba(18,14,10,0.85)'; ctx.lineWidth = Math.max(1, r * 0.14); ctx.lineCap = 'round';
-      const al = beetle ? 1.25 : 1.6;                     // beetles: short, clubbed
+      const al = beetle ? 1.25 : 1.6;
       ctx.beginPath(); ctx.moveTo(r * 0.95, -r * 0.18); ctx.lineTo(r * al, -r * 0.45); ctx.moveTo(r * 0.95, r * 0.18); ctx.lineTo(r * al, r * 0.45); ctx.stroke();
     }
-    // body
     ctx.fillStyle = s.color;
-    if (beetle) {                                         // dome + pronotum + head
+    if (beetle) {
       fillEllipse(ctx, abdomenX * r, 0, 1.0 * r, 0.74 * r);
       fillEllipse(ctx, 0.35 * r, 0, 0.4 * r, 0.46 * r);
       fillEllipse(ctx, 0.85 * r, 0, 0.36 * r, 0.34 * r);
-      ctx.strokeStyle = 'rgba(20,14,8,0.65)'; ctx.lineWidth = Math.max(1, r * 0.12);   // elytra split
+      ctx.strokeStyle = 'rgba(20,14,8,0.65)'; ctx.lineWidth = Math.max(1, r * 0.12);
       ctx.beginPath(); ctx.moveTo(0.25 * r, 0); ctx.lineTo((abdomenX - 0.95) * r, 0); ctx.stroke();
-    } else if (spider) {                                  // big abdomen + cephalothorax
+    } else if (spider) {
       fillEllipse(ctx, abdomenX * r, 0, 0.9 * r, 0.72 * r);
       fillEllipse(ctx, 0.42 * r, 0, 0.52 * r, 0.46 * r);
-      ctx.fillStyle = shade(s.color, -50);                // abdomen marking
+      ctx.fillStyle = shade(s.color, -50);
       fillEllipse(ctx, abdomenX * r, 0, 0.34 * r, 0.5 * r);
       ctx.fillStyle = s.color;
-    } else {                                              // ant / bee: classic 3 segments
+    } else {
       fillEllipse(ctx, abdomenX * r, 0, 0.8 * r, 0.6 * r);
       fillEllipse(ctx, 0.05 * r, 0, 0.46 * r, 0.42 * r);
       fillEllipse(ctx, 0.78 * r, 0, 0.5 * r, 0.46 * r);
     }
-    if (bee) {                                            // black stripes on the abdomen
+    if (bee) {                                            // black stripes
       ctx.save();
       ctx.beginPath(); ctx.ellipse(abdomenX * r, 0, 0.8 * r, 0.6 * r, 0, 0, Math.PI * 2); ctx.clip();
       ctx.fillStyle = 'rgba(26,18,6,0.9)';
@@ -267,11 +281,69 @@ window.BW = window.BW || {};
       ctx.restore();
     }
     if (u.venomTimer > 0) { ctx.fillStyle = 'rgba(124,255,107,0.35)'; fillEllipse(ctx, abdomenX * r, 0, 0.95 * r, 0.7 * r); }
-    // team-color band on the midsection — readable at a glance on a big map
     ctx.strokeStyle = tint; ctx.lineWidth = Math.max(1.4, r * 0.24);
     ctx.beginPath(); ctx.ellipse((beetle ? 0.35 : spider ? 0.42 : 0.05) * r, 0, 0.5 * r, 0.46 * r, 0, 0, Math.PI * 2); ctx.stroke();
     if (u.carrying > 0 && u.carryType) { ctx.fillStyle = cfg.resources[u.carryType].color; fillEllipse(ctx, -1.4 * r, 0, r * 0.34, r * 0.34); }
     ctx.restore();
+  }
+
+  /* ---- COMBAT FX -------------------------------------------------------
+     state.fx is a flat list of {kind, born, ...} the simulation appends to.
+     Each kind has its own short lifetime; anything older is dropped by
+     systems.update. Drawing is pure interpolation on age — no state written. */
+  const FX_LIFE = { tracer: 0.13, hit: 0.26, dmg: 0.9, death: 0.5, deposit: 0.9 };
+
+  function drawFx(ctx) {
+    const s = BW.state, z = zoom();
+    for (const f of s.fx) {
+      const life = FX_LIFE[f.kind] || 0.4;
+      const age = (s.time - f.born) / life;
+      if (age < 0 || age > 1) continue;
+
+      if (f.kind === 'tracer') {
+        // a quick bright line along the blow — makes "who is hitting whom" obvious
+        ctx.globalAlpha = (1 - age) * 0.85;
+        ctx.strokeStyle = f.team === 'player' ? '#dbeeff' : '#ffd9de';
+        ctx.lineWidth = 2 / z; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+        ctx.lineCap = 'butt'; ctx.globalAlpha = 1;
+
+      } else if (f.kind === 'hit') {
+        ctx.globalAlpha = (1 - age) * 0.9;
+        ring(ctx, f.x, f.y, 3 + age * 11, '#fff3c4', 2 / z);
+        ctx.globalAlpha = 1;
+
+      } else if (f.kind === 'dmg') {
+        if (z < 0.62) continue;                       // too small to read when zoomed out
+        const fs = Math.max(10, (f.crit ? 15 : 12) / z);
+        ctx.globalAlpha = 1 - age * age;              // linger, then fade fast
+        ctx.font = `700 ${fs}px "JetBrains Mono", monospace`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const yy = f.y - age * 26;
+        ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillText(f.text, f.x + 1, yy + 1);
+        ctx.fillStyle = f.crit ? '#ffd166' : (f.team === 'player' ? '#dbeeff' : '#ffb3bd');
+        ctx.fillText(f.text, f.x, yy);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+
+      } else if (f.kind === 'deposit') {
+        if (z < 0.62) continue;
+        const fs = Math.max(10, 12 / z);
+        ctx.globalAlpha = 1 - age;
+        ctx.font = `700 ${fs}px "JetBrains Mono", monospace`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const yy = f.y - age * 22;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(f.text, f.x + 1, yy + 1);
+        ctx.fillStyle = (cfg.resources[f.res] && cfg.resources[f.res].color) || '#fff';
+        ctx.fillText(f.text, f.x, yy);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+
+      } else if (f.kind === 'death') {
+        ctx.globalAlpha = (1 - age) * 0.7;
+        ctx.fillStyle = f.team === 'player' ? 'rgba(135,195,255,0.5)' : 'rgba(251,113,133,0.5)';
+        fillEllipse(ctx, f.x, f.y, (f.r || 8) * (1 + age * 1.6), (f.r || 8) * (1 + age * 1.6) * 0.7);
+        ctx.globalAlpha = 1;
+      }
+    }
   }
 
   /* ---- overlays -------------------------------------------------------- */
@@ -287,7 +359,7 @@ window.BW = window.BW || {};
   function drawPings(ctx) {
     for (const pg of BW.state.pings) {
       const age = (BW.state.time - pg.t) / 0.5; if (age < 0 || age > 1) continue;
-      const col = pg.type === 'attack' ? C.enemyTint : pg.type === 'gather' ? cfg.resources.food.color : pg.type === 'build' ? C.playerTint : C.playerTint;
+      const col = pg.type === 'attack' ? C.enemyTint : pg.type === 'gather' ? cfg.resources.food.color : C.playerTint;
       ctx.globalAlpha = 1 - age; ring(ctx, pg.x, pg.y, 4 + age * 18, col, 2); ctx.globalAlpha = 1;
     }
   }
@@ -300,11 +372,53 @@ window.BW = window.BW || {};
   }
   function drawDrag(ctx, d) {
     const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1), w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
-    ctx.fillStyle = 'rgba(135,195,255,0.12)'; ctx.strokeStyle = C.playerTint; ctx.lineWidth = 1.5; ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(135,195,255,0.12)'; ctx.strokeStyle = C.playerTint; ctx.lineWidth = 1.5 / zoom(); ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+  }
+  // Show where a selected unit is headed — including its queued orders, so a
+  // shift-chain reads as a visible route rather than invisible intent.
+  function drawOrderLines(ctx) {
+    const s = BW.state;
+    if (s.selected.size > 24) return;                 // too noisy for a big blob
+    ctx.save();
+    ctx.setLineDash([5, 5]); ctx.lineWidth = 1.2 / zoom();
+    for (const id of s.selected) {
+      const u = BW.byId(id); if (!u) continue;
+      let px = u.x, py = u.y;
+      const legs = [u.order, ...(u.queue || [])];
+      for (const o of legs) {
+        if (!o || o.type === 'idle' || o.type === 'hold') continue;
+        const t = o.targetId != null ? BW.byId(o.targetId) : null;
+        const tx = t ? t.x : o.tx, ty = t ? t.y : o.ty;
+        if (tx == null) continue;
+        ctx.strokeStyle = o.type === 'attack' || o.type === 'attackMove' ? 'rgba(251,113,133,0.55)'
+                        : o.type === 'gather' || o.type === 'returning' ? 'rgba(182,211,107,0.55)'
+                        : 'rgba(135,195,255,0.5)';
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(tx, ty); ctx.stroke();
+        px = tx; py = ty;
+      }
+    }
+    ctx.restore();
   }
 
   /* ---- HUD (DOM) ------------------------------------------------------- */
   const $ = id => document.getElementById(id);
+  const NAMES = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
+                  drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet',
+                  grub: 'Grub', bruiser: 'Bruiser', bombardier: 'Bombardier', ram: 'Ram Beetle',
+                  spiderling: 'Spiderling', hunter: 'Hunter', spitter: 'Spitter', weaver: 'Weaver', balloonist: 'Balloonist' };
+
+  // A rough "who would win" number: each fighter contributes hp x damage. It is
+  // deliberately crude — it tells you whether you are ahead, not by how much.
+  function armyPower(team) {
+    const g = cfg.FACTIONS[BW.state.faction[team]].gatherer;
+    let p = 0;
+    for (const u of BW.state.units) {
+      if (u.team !== team || u.kind === g) continue;
+      p += u.hp * BW.systems.damageOf(u);
+    }
+    return p;
+  }
+
   function updateHUD() {
     const s = BW.state, res = s.res.player;
     const pop = s.units.filter(u => u.team === 'player').length;
@@ -314,18 +428,37 @@ window.BW = window.BW || {};
     if ($('popCount'))      $('popCount').textContent = pop + '/' + cfg.popCap;
     if ($('selCount'))      $('selCount').textContent = s.selected.size;
     if ($('clock')) { const t = Math.floor(s.time); $('clock').textContent = (t / 60 | 0) + ':' + String(t % 60).padStart(2, '0'); }
+    if ($('zoomVal'))       $('zoomVal').textContent = Math.round(zoom() * 100) + '%';
+
+    // army strength comparison
+    const pw = armyPower('player'), ew = armyPower('enemy'), tot = pw + ew;
+    const fill = $('powerFill');
+    if (fill) {
+      const pct = tot > 0 ? (pw / tot) * 100 : 50;
+      fill.style.width = pct.toFixed(1) + '%';
+      const lbl = $('powerLabel');
+      if (lbl) lbl.textContent = tot === 0 ? 'no armies yet'
+              : pct > 62 ? 'you are stronger' : pct < 38 ? 'they are stronger' : 'evenly matched';
+    }
+
+    // research progress
+    const rp = $('resProgress'), r = s.research.player;
+    if (rp) {
+      if (!r) rp.classList.remove('show');
+      else {
+        rp.classList.add('show');
+        const pct = Math.round((1 - r.timeLeft / r.total) * 100);
+        rp.textContent = '⚗ ' + cfg.UPGRADES[r.id].name + ' — ' + pct + '%';
+      }
+    }
 
     const selEl = $('selSummary');
     if (selEl) {
-      if (!s.selected.size) selEl.textContent = 'drag a box to select · double-click a unit for all of its type';
+      if (!s.selected.size) selEl.textContent = 'drag a box to select · Ctrl+click for all of a type · Ctrl+1..9 saves a group';
       else {
-        const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
-                        drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet',
-                        grub: 'Grub', bruiser: 'Bruiser', bombardier: 'Bombardier', ram: 'Ram Beetle',
-                        spiderling: 'Spiderling', hunter: 'Hunter', spitter: 'Spitter', weaver: 'Weaver', balloonist: 'Balloonist' };
         const counts = {};
         for (const id of s.selected) { const u = BW.byId(id); if (u) counts[u.kind] = (counts[u.kind] || 0) + 1; }
-        selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + names[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ');
+        selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + NAMES[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ');
       }
     }
 
@@ -339,7 +472,16 @@ window.BW = window.BW || {};
       btn.classList.toggle('cant', !BW.systems.canAfford(res, cfg.BUILDING_STATS[k].cost));
       btn.classList.toggle('active', !!(s.placing && s.placing.kind === k));
     });
+    document.querySelectorAll('.resbtn').forEach(btn => {
+      const id = btn.dataset.research;
+      const done = s.upgrades.player.has(id);
+      const active = !!(s.research.player && s.research.player.id === id);
+      btn.classList.toggle('done', done);
+      btn.classList.toggle('active', active);
+      btn.classList.toggle('cant', !done && !active && !BW.systems.researchState(id, 'player').ok);
+    });
   }
+
   function updateOverlay() {
     const s = BW.state, ov = $('overlay'); if (!ov) return;
     if (s.phase !== 'won' && s.phase !== 'lost') { ov.classList.remove('show'); return; }
@@ -351,13 +493,13 @@ window.BW = window.BW || {};
     } else {
       $('overlayTitle').textContent = blue ? 'Victory' : 'Defeat';
       $('overlayTitle').className = blue ? 'win' : 'lose';
-      $('overlayMsg').textContent = blue ? 'The rival colony is broken. The garden is yours.' : 'Your nest has fallen. The colony scatters.';
+      const t = Math.floor(s.time), mmss = (t / 60 | 0) + ':' + String(t % 60).padStart(2, '0');
+      $('overlayMsg').textContent = (blue ? 'The rival colony is broken. The garden is yours.' : 'Your nest has fallen. The colony scatters.') + '  (' + mmss + ')';
     }
     ov.classList.add('show');
   }
 
   /* ---- main draw ------------------------------------------------------- */
-  // selected production building: ring it, and show where its rally point sends new units
   function drawRally(ctx) {
     const s = BW.state;
     if (s.selectedBuilding == null) return;
@@ -373,11 +515,11 @@ window.BW = window.BW || {};
     ctx.fillStyle = C.selection;                                            // flag
     ctx.beginPath(); ctx.moveTo(rx, ry - 17); ctx.lineTo(rx + 12, ry - 13); ctx.lineTo(rx, ry - 9); ctx.closePath(); ctx.fill();
     ctx.lineWidth = 1; ctx.stroke();
-    fillEllipse(ctx, rx, ry, 2.5, 2.5);                                     // base dot
+    fillEllipse(ctx, rx, ry, 2.5, 2.5);
     ctx.restore();
   }
 
-  /* ---- minimap (AoE-style, bottom-right) -------------------------------- */
+  /* ---- minimap (bottom-right, SCREEN space) ----------------------------- */
   function drawMinimap(ctx) {
     const s = BW.state, m = BW.minimapRect();
     const sx = m.w / cfg.world.width, sy = m.h / cfg.world.height;
@@ -386,50 +528,56 @@ window.BW = window.BW || {};
     ctx.fillRect(m.x - 2, m.y - 2, m.w + 4, m.h + 4);
     ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
     ctx.strokeRect(m.x - 2, m.y - 2, m.w + 4, m.h + 4);
-    for (const o of s.obstacles) {                                     // terrain
+    for (const o of s.obstacles) {
       ctx.fillStyle = 'rgba(130,138,150,0.5)';
       ctx.fillRect(m.x + o.x * sx - 1.5, m.y + o.y * sy - 1.5, 3, 3);
     }
-    for (const n of s.nodes) {                                         // resources
+    for (const n of s.nodes) {
       if (n.amount <= 1) continue;
       ctx.fillStyle = (cfg.resources[n.resource] && cfg.resources[n.resource].color) || '#888';
       ctx.fillRect(m.x + n.x * sx - 1, m.y + n.y * sy - 1, 2, 2);
     }
-    for (const b of s.buildings) {                                     // buildings (bigger dots)
+    for (const b of s.buildings) {
       const isBase = cfg.BUILDING_STATS[b.kind].category === 'nest';
       ctx.fillStyle = tintOf(b.team);
       const d = isBase ? 5 : 3;
       ctx.fillRect(m.x + b.x * sx - d / 2, m.y + b.y * sy - d / 2, d, d);
     }
-    for (const u of s.units) {                                         // units
+    for (const u of s.units) {
       ctx.fillStyle = tintOf(u.team);
       ctx.fillRect(m.x + u.x * sx - 1, m.y + u.y * sy - 1, 2, 2);
     }
-    for (const a of s.alerts) {                                        // attack alert blink
+    for (const a of s.alerts) {
       if (a.type !== 'incoming' || a.x == null) continue;
       if (Math.sin(s.time * 10) > 0) { ctx.fillStyle = C.alert; ctx.fillRect(m.x + a.x * sx - 3, m.y + a.y * sy - 3, 6, 6); }
     }
-    // camera viewport rectangle
+    // camera viewport rectangle — size now depends on zoom
+    const vw = cfg.view.width / zoom(), vh = cfg.view.height / zoom();
     ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1;
-    ctx.strokeRect(m.x + s.camera.x * sx, m.y + s.camera.y * sy, cfg.view.width * sx, cfg.view.height * sy);
+    ctx.strokeRect(m.x + s.camera.x * sx, m.y + s.camera.y * sy, vw * sx, vh * sy);
     ctx.restore();
   }
 
   function render(ctx) {
-    const s = BW.state, cam = s.camera || { x: 0, y: 0 };
-    const cx = Math.round(cam.x), cy = Math.round(cam.y);              // integer offsets = crisp pixels
-    const vis = (e, m) => e.x > cx - m && e.x < cx + cfg.view.width + m && e.y > cy - m && e.y < cy + cfg.view.height + m;
+    const s = BW.state, cam = s.camera || { x: 0, y: 0, zoom: 1 };
+    const z = cam.zoom || 1;
+    const vw = cfg.view.width / z, vh = cfg.view.height / z;
+    const cx = cam.x, cy = cam.y;
+    const vis = (e, m) => e.x > cx - m && e.x < cx + vw + m && e.y > cy - m && e.y < cy + vh + m;
 
     ctx.save();
+    ctx.scale(z, z);
     ctx.translate(-cx, -cy);                                           // world → screen
-    drawBackground(ctx, { x: cx, y: cy });
+    drawBackground(ctx, { x: cx, y: cy }, vw, vh);
     for (const n of s.nodes) if (vis(n, 40)) drawNode(ctx, n);
     for (const o of s.obstacles) if (vis(o, 80)) drawRock(ctx, o);
     for (const b of s.buildings) if (vis(b, 160)) drawBuilding(ctx, b);
-    for (const id of s.selected) { const u = BW.byId(id); if (u) ring(ctx, u.x, u.y, ER(u) + 5, C.selection, 2); }
+    drawOrderLines(ctx);
+    for (const id of s.selected) { const u = BW.byId(id); if (u) ring(ctx, u.x, u.y, ER(u) + 5, C.selection, 2 / z); }
     drawRally(ctx);
     for (const u of s.units) if (vis(u, 40)) drawAnt(ctx, u, s.time);
     for (const u of s.units) if (u.hp < u.maxHp && vis(u, 40)) bar(ctx, u.x, u.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
+    drawFx(ctx);
     drawAlerts(ctx); drawPings(ctx); drawGhost(ctx);
     if (s.drag) drawDrag(ctx, s.drag);
     ctx.restore();

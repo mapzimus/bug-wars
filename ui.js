@@ -1,10 +1,10 @@
 /* ============================================================================
-   Bug Wars — ui.js   (v3 — faction-aware)
+   Bug Wars — ui.js   (v5 — faction-aware, now with research)
    ----------------------------------------------------------------------------
    The onboarding + HUD-chrome layer: start menu, faction picker, difficulty,
-   the dynamically-built build/train panel for the chosen faction, the attack
-   warning, and a faction-aware tutorial. Only observes state + updates DOM.
-   (Panel buttons are built with safe DOM methods, not innerHTML.)
+   the dynamically-built build / train / RESEARCH panel for the chosen faction,
+   the attack warning, and a faction-aware tutorial. Only observes state +
+   updates DOM. (Panel buttons are built with safe DOM methods, not innerHTML.)
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -37,12 +37,12 @@ window.BW = window.BW || {};
   const costStr = cost => Object.keys(cost).map(k => ICON[k] + ' ' + cost[k]).join(' ') || '—';
 
   const span = (cls, text) => { const e = document.createElement('span'); e.className = cls; e.textContent = text; return e; };
-  function makeBtn(cls, dataKey, kind, cost, hotkey) {
+  function makeBtn(cls, dataKey, kind, label, cost, hotkey, desc) {
     const btn = document.createElement('button');
     btn.className = cls; btn.dataset[dataKey] = kind;
-    btn.append(span('bk', NAMES[kind] || kind), span('bc', cost));
-    if (hotkey != null) btn.append(span('bh', hotkey));
-    btn.append(span('bd', DESC[kind] || ''));
+    btn.append(span('bk', label), span('bc', cost));
+    if (hotkey != null) btn.append(span('bh', String(hotkey).toUpperCase()));
+    btn.append(span('bd', desc || ''));
     return btn;
   }
   function rowLabel(text, small) {
@@ -50,24 +50,49 @@ window.BW = window.BW || {};
     if (small) { const sm = document.createElement('small'); sm.textContent = small; e.append(sm); }
     return e;
   }
-  // Rebuild the build/train buttons for the player's faction (safe DOM, no innerHTML).
+
+  // Rebuild the build / train / research buttons for the player's faction.
+  // Hotkey letters come from BW.HOTKEYS so the label and the key handler can
+  // never disagree.
   function buildPanel(faction) {
     const F = cfg.FACTIONS[faction]; if (!F) return;
-    const br = $('buildRow'), tr = $('trainRow');
-    if (br) { br.replaceChildren(rowLabel('Build', '(Mud)')); F.buildMenu.forEach(k => br.append(makeBtn('buildbtn', 'build', k, costStr(cfg.BUILDING_STATS[k].cost)))); }
-    if (tr) { tr.replaceChildren(rowLabel('Train')); F.trainMenu.forEach((k, i) => tr.append(makeBtn('trainbtn', 'train', k, costStr(cfg.UNIT_STATS[k].cost), i + 1))); }
+    const HK = BW.HOTKEYS || { build: [], train: [] };
+    const br = $('buildRow'), tr = $('trainRow'), rr = $('researchRow');
+
+    if (br) {
+      br.replaceChildren(rowLabel('Build', '(Mud)'));
+      F.buildMenu.forEach((k, i) => br.append(
+        makeBtn('buildbtn', 'build', k, NAMES[k] || k, costStr(cfg.BUILDING_STATS[k].cost), HK.build[i], DESC[k])));
+    }
+    if (tr) {
+      tr.replaceChildren(rowLabel('Train', '(shift = ×5)'));
+      F.trainMenu.forEach((k, i) => tr.append(
+        makeBtn('trainbtn', 'train', k, NAMES[k] || k, costStr(cfg.UNIT_STATS[k].cost), HK.train[i], DESC[k])));
+    }
+    if (rr) {
+      rr.replaceChildren(rowLabel('Research', '(click)'));
+      const ids = BW.systems.availableUpgrades('player');
+      ids.forEach(id => {
+        const u = cfg.UPGRADES[id];
+        rr.append(makeBtn('resbtn', 'research', id, u.name, costStr(u.cost), null, u.desc));
+      });
+    }
   }
 
-  // Faction-aware tutorial (works for ants or bees).
+  // Faction-aware tutorial. v5 teaches the controls that actually matter now
+  // (groups, stances, research) instead of stopping at "build a barracks".
   const pf = () => (BW.state && BW.state.faction) ? BW.state.faction.player : 'ants';
+  const gath = () => cfg.FACTIONS[pf()].gatherer;
   const STEPS = [
-    { text: "Drag a box over your gatherers, then RIGHT-CLICK a Food pile (green) to mine it. Scroll the map with WASD / arrows / screen edges — or click the minimap.",
-      done: s => s.units.some(u => u.team === 'player' && u.kind === cfg.FACTIONS[pf()].gatherer && (u.order.type === 'gather' || u.order.type === 'returning')) },
-    { text: "You need MUD (brown) to build. With ~120 mud, click your production building below and place it near your base.",
+    { text: "Drag a box over your gatherers, then RIGHT-CLICK a Food pile (green) to mine it. Scroll with WASD / arrows / screen edges, and ZOOM with the mouse wheel.",
+      done: s => s.units.some(u => u.team === 'player' && u.kind === gath() && (u.order.type === 'gather' || u.order.type === 'returning')) },
+    { text: "You need MUD (brown) to build. With ~120 mud, press the Build hotkey for your production building (shown on the button) and click a spot near your base.",
       done: s => s.buildings.some(b => b.team === 'player' && b.kind === cfg.FACTIONS[pf()].producers[0]) },
-    { text: "Train fighters from it (number keys). Counters matter — skirmishers shoot down flyers, siege wrecks buildings.",
-      done: s => s.units.some(u => u.team === 'player' && u.kind !== cfg.FACTIONS[pf()].gatherer) },
-    { text: "Defend with a Tower + Walls, keep your economy running, and RIGHT-CLICK the enemy base to destroy it. A warning shows when they attack!",
+    { text: "Train fighters (Z / C / V …, hold Shift for five). Counters matter: infantry > skirmishers, skirmishers > siege AND flyers, siege > buildings.",
+      done: s => s.units.some(u => u.team === 'player' && u.kind !== gath()) },
+    { text: "Select your army (E) and press Ctrl+1 to save it as group 1 — then 1 recalls it, and tapping 1 twice jumps the camera there. X stops, H holds position.",
+      done: s => Object.keys(s.groups || {}).length > 0 },
+    { text: "Spend HONEYDEW (gold) on Research in the bottom row — damage, armour and gather upgrades compound fast. Then right-click the enemy base to end it.",
       done: () => false },
   ];
   let stepIdx = 0, lastPhase = 'menu', selectedFaction = 'ants';

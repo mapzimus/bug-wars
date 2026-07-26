@@ -44,7 +44,7 @@ window.BW = window.BW || {};
         if (gap > best && sys().nearestNode(u, r)) { best = gap; pick = r; }
       }
       const node = (pick && sys().nearestNode(u, pick)) || sys().nearestNode(u);
-      if (node) { u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id }; have[node.resource]++; assigned++; }
+      if (node) { sys().giveOrder(u, { type: 'gather', tx: node.x, ty: node.y, targetId: node.id }, false); have[node.resource]++; assigned++; }
     }
   }
 
@@ -82,10 +82,14 @@ window.BW = window.BW || {};
     if ((foe.siege >= 2 || foe.flyer >= 2) && canTrain(team, A.skirmisher)) want = A.skirmisher;       // skirmisher > siege & anti-air
     else if (foe.infantry >= 3 && canTrain(team, A.siege) && foe.infantry >= foe.skirmisher) want = A.siege; // siege > infantry
     else if (foe.skirmisher >= 3) want = A.frontline;                                                  // infantry > skirmisher
+    // Air counters siege — if they are massing it, get the flyers out.
+    else if (foe.siege >= 2 && A.flyer && canTrain(team, A.flyer) && mine.flyer < 4) want = A.flyer;
     else {                                                    // no clear read → healthy mix
       if (mine.skirmisher < mine.infantry * 0.5 && canTrain(team, A.skirmisher)) want = A.skirmisher;
       else if (canTrain(team, A.siege) && mine.siege < mine.infantry * 0.4) want = A.siege;
-      else if (A.flyer && canTrain(team, A.flyer) && mine.flyer < 2) want = A.flyer;   // bees keep a couple of hornets
+      // A flying faction should actually FIELD its flyers — v4 capped this at 2,
+      // which meant Bees and Spiders played like worse Ants all game.
+      else if (A.flyer && canTrain(team, A.flyer) && mine.flyer < Math.max(3, mine.infantry * 0.6)) want = A.flyer;
     }
     if (want) BW.tryTrain(want, team);
   }
@@ -108,7 +112,7 @@ window.BW = window.BW || {};
 
     const garrison = (opportunity || lateGame) ? 0 : Math.max(2, Math.round(eff * 0.3));
     const send = idle.slice().sort((u, v) => d2t(u) - d2t(v)).slice(0, Math.max(1, idle.length - garrison));
-    for (const u of send) u.order = { type: 'attackMove', tx: target.x, ty: target.y, targetId: null };
+    for (const u of send) sys().giveOrder(u, { type: 'attackMove', tx: target.x, ty: target.y, targetId: null }, false);
 
     if (BW.state.controllers[opp(team)] === 'human') {
       const warn = BW.state.alerts.some(al => al.type === 'incoming' && al.until > BW.state.time);
@@ -119,11 +123,29 @@ window.BW = window.BW || {};
     }
   }
 
+  /* ---- research (v5) --------------------------------------------------
+     The AI spends honeydew on the same upgrade table the player sees, in a
+     fixed sensible order. It is gated by difficulty (`research` in the
+     profile), so Easy stays a genuinely soft opponent rather than an
+     equally-teched one that just attacks later. */
+  const AI_RESEARCH_ORDER = ['foraging1', 'mandibles1', 'carapace1',
+                             'tunnels', 'royaljelly', 'ironshell', 'potentvenom',
+                             'foraging2', 'mandibles2', 'carapace2'];
+  function maybeResearch(team) {
+    if (!prof().research) return;
+    if (BW.state.research[team]) return;                 // one at a time, same as the player
+    for (const id of AI_RESEARCH_ORDER) {
+      if (BW.state.upgrades[team].has(id)) continue;
+      if (sys().researchState(id, team).ok) { BW.tryResearch(id, team); return; }
+    }
+  }
+
   function thinkFor(team) {
     if (!baseOf(team)) return;
     assignIdleWorkers(team);
     maybeBuild(team);
     maybeTrain(team);
+    maybeResearch(team);
     maybeAttack(team);
   }
 

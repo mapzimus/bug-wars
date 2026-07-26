@@ -51,15 +51,17 @@ body{
 .ctrl:hover{background:rgba(135,195,255,.20);}
 .ctrl.big{font-size:16px;padding:11px 22px;}
 /* compact speed stepper in the topbar */
-.spd-ctl{gap:6px;}
+.spd-ctl,.zoom-ctl{gap:6px;}
 .ctrl.spd{padding:3px 9px;font-size:15px;font-weight:600;line-height:1;border-radius:5px;}
-.spd-ctl #speedVal{min-width:38px;text-align:center;color:var(--accent);}
+.spd-ctl #speedVal,.zoom-ctl #zoomVal{min-width:44px;text-align:center;color:var(--accent);}
 
 /* ---- stage / canvas ---- */
-.stage{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;
-  padding:10px;background:radial-gradient(1200px 500px at 50% -10%,rgba(135,195,255,.06),transparent 60%),var(--bg);}
-#gameCanvas{max-width:100%;max-height:100%;aspect-ratio:1280/720;border:1px solid var(--border);
-  border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);cursor:crosshair;touch-action:none;}
+/* v5: the canvas FILLS the stage — main.js sizes it to this box on resize.
+   No aspect-ratio lock and no letterboxing: on a wide monitor you get a wide
+   battlefield, which is the whole point of an RTS. */
+.stage{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;
+  background:var(--bg);}
+#gameCanvas{display:block;width:100%;height:100%;cursor:crosshair;touch-action:none;}
 
 .warn-banner{position:absolute;top:16px;left:50%;transform:translate(-50%,-12px);
   background:rgba(251,113,133,.16);color:var(--rose);border:1px solid rgba(251,113,133,.5);
@@ -75,11 +77,29 @@ body{
 
 .tutorial{position:absolute;top:14px;left:14px;max-width:300px;display:none;
   background:rgba(10,14,23,.86);border:1px solid var(--border);border-radius:10px;
-  padding:11px 13px;backdrop-filter:blur(6px);}
+  padding:11px 13px;backdrop-filter:blur(6px);
+  pointer-events:none;}          /* same reason as .sel-panel — don't eat map clicks */
 .tutorial.show{display:block;}
+.tutorial .tut-x{pointer-events:auto;}
 .tut-h{font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin-bottom:5px;}
 .tut-t{font-size:13px;color:var(--text);line-height:1.45;}
 .tut-x{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;}
+
+/* ---- army strength comparison (top-centre) ---- */
+.power-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:230px;
+  display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:none;z-index:3;}
+.power-track{width:100%;height:7px;border-radius:99px;overflow:hidden;
+  background:rgba(251,113,133,.55);border:1px solid rgba(255,255,255,.22);}
+.power-fill{height:100%;width:50%;background:var(--accent);transition:width .35s ease;}
+.power-label{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);
+  text-shadow:0 1px 3px rgba(0,0,0,.8);}
+
+/* ---- research progress chip ---- */
+.res-progress{position:absolute;top:34px;right:14px;display:none;
+  background:rgba(255,209,102,.14);color:var(--honey);border:1px solid rgba(255,209,102,.45);
+  font-family:'JetBrains Mono',monospace;font-size:12px;padding:5px 12px;border-radius:999px;
+  backdrop-filter:blur(6px);z-index:4;pointer-events:none;}
+.res-progress.show{display:block;}
 
 /* ---- overlays (menu + win/lose) ---- */
 .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
@@ -112,8 +132,13 @@ body{
 /* ---- selection bar ---- */
 .sel-panel{position:absolute;bottom:12px;left:12px;display:flex;flex-direction:column;gap:6px;
   background:rgba(10,14,23,.82);border:1px solid var(--border);border-radius:10px;padding:9px 11px;
-  backdrop-filter:blur(6px);max-width:360px;z-index:4;}
-.sel-row{display:flex;align-items:center;gap:6px;}
+  backdrop-filter:blur(6px);max-width:440px;z-index:4;
+  /* The canvas is full-bleed now, so this card floats OVER live battlefield —
+     often right on top of your own base. Let clicks and box-drags fall through
+     to the map; only the buttons themselves capture the pointer. */
+  pointer-events:none;}
+.sel-panel .selbtn{pointer-events:auto;}
+.sel-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .sel-label{font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-right:2px;}
 .selbtn{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);background:rgba(135,195,255,.10);
   border:1px solid rgba(135,195,255,.25);border-radius:6px;padding:4px 10px;cursor:pointer;transition:background .15s;}
@@ -135,20 +160,30 @@ body{
 .row-label{align-self:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);
   min-width:54px;text-align:right;}
 .row-label small{opacity:.7;}
-.buildbtn,.trainbtn{position:relative;min-width:128px;text-align:left;display:grid;
+.buildbtn,.trainbtn,.resbtn{position:relative;min-width:128px;text-align:left;display:grid;
   grid-template-columns:1fr auto;gap:1px 8px;background:var(--card);border:1px solid var(--border);
   border-radius:9px;padding:7px 11px;color:var(--text);cursor:pointer;transition:border-color .15s,transform .05s,background .15s;}
-.buildbtn:hover,.trainbtn:hover{border-color:var(--accent);}
-.buildbtn:active,.trainbtn:active{transform:translateY(1px);}
+.buildbtn:hover,.trainbtn:hover,.resbtn:hover{border-color:var(--accent);}
+.buildbtn:active,.trainbtn:active,.resbtn:active{transform:translateY(1px);}
 .buildbtn.active{border-color:var(--accent);background:rgba(135,195,255,.14);}
+/* research buttons key off honeydew gold so the tech row reads as its own track */
+.resbtn .bc{color:var(--honey);}
+.resbtn:hover{border-color:var(--honey);}
+.resbtn.active{border-color:var(--honey);background:rgba(255,209,102,.16);}
+.resbtn.done{opacity:.5;border-color:var(--green);}
+.resbtn.done .bc{color:var(--green);}
+.resbtn.done .bc::after{content:' ✓';}
 .bk{font-weight:600;font-size:13px;}
 .bc{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);text-align:right;white-space:nowrap;}
 .bd{grid-column:1/-1;font-size:10.5px;color:var(--muted);}
 .bh{position:absolute;top:-7px;right:-7px;width:17px;height:17px;border-radius:5px;
   font-family:'JetBrains Mono',monospace;font-size:11px;display:flex;align-items:center;justify-content:center;
   background:var(--accent);color:var(--bg);font-weight:600;}
-.buildbtn.cant,.trainbtn.cant{opacity:.42;}
+.buildbtn.cant,.trainbtn.cant,.resbtn.cant{opacity:.42;}
 .buildbtn.cant .bc,.trainbtn.cant .bc{color:var(--rose);}
+.resbtn.cant .bc{color:var(--rose);}
+.resbtn.done.cant{opacity:.5;}
+.resbtn.done.cant .bc{color:var(--green);}
 
 @media (max-width:820px){
   .stat .rlabel,.stat .label{display:none;}
