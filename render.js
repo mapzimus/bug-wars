@@ -168,10 +168,11 @@ window.BW = window.BW || {};
       ctx.strokeStyle = tint; ctx.lineWidth = 2.5; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, false);
       drawGlyph(ctx, b, r);
     }
-    // training progress ring + queue badge (the unit-creation countdown)
+    // training progress ring + queue badge (turns remaining)
     if (b.trainQueue && b.trainQueue.length) {
-      const total = cfg.UNIT_STATS[b.trainQueue[0]].buildTime;
-      const prog = Math.max(0, Math.min(1, 1 - b.trainTimer / total));
+      const total = cfg.UNIT_STATS[b.trainQueue[0]].trainTurns;
+      const left = b.trainTimer > 0 ? b.trainTimer : total;
+      const prog = Math.max(0, Math.min(1, 1 - left / total));
       const rr = r + 9;
       ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(b.x, b.y, rr, 0, Math.PI * 2); ctx.stroke();
@@ -266,23 +267,29 @@ window.BW = window.BW || {};
       for (const dx of [-1.05, -0.7, -0.35]) fillEllipse(ctx, dx * r, 0, 0.1 * r, 0.7 * r);
       ctx.restore();
     }
-    if (u.venomTimer > 0) { ctx.fillStyle = 'rgba(124,255,107,0.35)'; fillEllipse(ctx, abdomenX * r, 0, 0.95 * r, 0.7 * r); }
+    if (u.venomTurns > 0) { ctx.fillStyle = 'rgba(124,255,107,0.35)'; fillEllipse(ctx, abdomenX * r, 0, 0.95 * r, 0.7 * r); }
     // team-color band on the midsection — readable at a glance on a big map
     ctx.strokeStyle = tint; ctx.lineWidth = Math.max(1.4, r * 0.24);
     ctx.beginPath(); ctx.ellipse((beetle ? 0.35 : spider ? 0.42 : 0.05) * r, 0, 0.5 * r, 0.46 * r, 0, 0, Math.PI * 2); ctx.stroke();
-    if (u.carrying > 0 && u.carryType) { ctx.fillStyle = cfg.resources[u.carryType].color; fillEllipse(ctx, -1.4 * r, 0, r * 0.34, r * 0.34); }
+    if (u.gathering) { ctx.fillStyle = '#b6d36b'; fillEllipse(ctx, -1.4 * r, 0, r * 0.34, r * 0.34); }
     ctx.restore();
   }
 
   /* ---- overlays -------------------------------------------------------- */
   function drawGhost(ctx) {
     const s = BW.state; if (!s.placing || !s.placeXY) return;
+    const sn = BW.world.snapXY(s.placeXY.x, s.placeXY.y);
     const r = cfg.BUILDING_STATS[s.placing.kind].radius;
-    const ok = BW.systems.validPlacement(s.placing.kind, s.placeXY.x, s.placeXY.y)
+    const ok = BW.systems.validPlacement(s.placing.kind, sn.x, sn.y)
             && BW.systems.canAfford(s.res.player, cfg.BUILDING_STATS[s.placing.kind].cost);
     ctx.fillStyle = ok ? C.ghostOk : C.ghostBad;
-    ctx.beginPath(); ctx.arc(s.placeXY.x, s.placeXY.y, r, 0, Math.PI * 2); ctx.fill();
-    ring(ctx, s.placeXY.x, s.placeXY.y, r, ok ? C.playerTint : C.alert, 2);
+    ctx.beginPath(); ctx.arc(sn.x, sn.y, r, 0, Math.PI * 2); ctx.fill();
+    ring(ctx, sn.x, sn.y, r, ok ? C.playerTint : C.alert, 2);
+    // tile outline
+    const T = cfg.turns.tile;
+    ctx.strokeStyle = ok ? 'rgba(135,195,255,0.7)' : 'rgba(251,113,133,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(sn.gx * T + 2, sn.gy * T + 2, T - 4, T - 4);
   }
   function drawPings(ctx) {
     for (const pg of BW.state.pings) {
@@ -308,16 +315,17 @@ window.BW = window.BW || {};
   function updateHUD() {
     const s = BW.state, res = s.res.player;
     const pop = s.units.filter(u => u.team === 'player').length;
+    const ready = s.units.filter(u => u.team === 'player' && !u.acted).length;
     if ($('foodCount'))     $('foodCount').textContent = Math.floor(res.food);
     if ($('mudCount'))      $('mudCount').textContent = Math.floor(res.mud);
     if ($('honeydewCount')) $('honeydewCount').textContent = Math.floor(res.honeydew);
     if ($('popCount'))      $('popCount').textContent = pop + '/' + cfg.popCap;
-    if ($('selCount'))      $('selCount').textContent = s.selected.size;
-    if ($('clock')) { const t = Math.floor(s.time); $('clock').textContent = (t / 60 | 0) + ':' + String(t % 60).padStart(2, '0'); }
+    if ($('selCount'))      $('selCount').textContent = ready;
+    if ($('clock')) $('clock').textContent = (s.turn && s.turn.number) || 1;
 
     const selEl = $('selSummary');
     if (selEl) {
-      if (!s.selected.size) selEl.textContent = 'drag a box to select · double-click a unit for all of its type';
+      if (!s.selected.size) selEl.textContent = 'tap a unit · blue = move · red = attack · End Turn when done';
       else {
         const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
                         drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet',
@@ -325,18 +333,23 @@ window.BW = window.BW || {};
                         spiderling: 'Spiderling', hunter: 'Hunter', spitter: 'Spitter', weaver: 'Weaver', balloonist: 'Balloonist' };
         const counts = {};
         for (const id of s.selected) { const u = BW.byId(id); if (u) counts[u.kind] = (counts[u.kind] || 0) + 1; }
-        selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + names[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ');
+        const u0 = BW.byId([...s.selected][0]);
+        const tag = u0 && u0.acted ? ' · already acted' : ' · choose a tile or target';
+        selEl.textContent = Object.keys(counts).map(k => counts[k] + ' ' + names[k] + (counts[k] > 1 ? 's' : '')).join('  ·  ') + tag;
       }
     }
 
     document.querySelectorAll('.trainbtn').forEach(btn => {
       const k = btn.dataset.train, st = cfg.UNIT_STATS[k];
-      const ok = BW.systems.producerFor(k, 'player') && BW.systems.canAfford(res, st.cost);
+      const ok = BW.systems.producerFor(k, 'player') && BW.systems.canAfford(res, st.cost)
+        && s.turn && s.turn.side === 'player' && !s.turn.busy;
       btn.classList.toggle('cant', !ok);
     });
     document.querySelectorAll('.buildbtn').forEach(btn => {
       const k = btn.dataset.build;
-      btn.classList.toggle('cant', !BW.systems.canAfford(res, cfg.BUILDING_STATS[k].cost));
+      const ok = BW.systems.canAfford(res, cfg.BUILDING_STATS[k].cost)
+        && s.turn && s.turn.side === 'player' && !s.turn.busy;
+      btn.classList.toggle('cant', !ok);
       btn.classList.toggle('active', !!(s.placing && s.placing.kind === k));
     });
   }
@@ -415,26 +428,53 @@ window.BW = window.BW || {};
     ctx.restore();
   }
 
+  function drawMoveHint(ctx) {
+    const h = BW.state.moveHint; if (!h) return;
+    const T = cfg.turns.tile;
+    ctx.save();
+    for (const k of h.moves) {
+      const [gx, gy] = k.split(',').map(Number);
+      const x = gx * T, y = gy * T;
+      ctx.fillStyle = 'rgba(135,195,255,0.22)';
+      ctx.strokeStyle = 'rgba(135,195,255,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(x + 3, y + 3, T - 6, T - 6);
+      ctx.strokeRect(x + 3, y + 3, T - 6, T - 6);
+    }
+    for (const id of h.attacks) {
+      const e = BW.byId(id); if (!e) continue;
+      ring(ctx, e.x, e.y, ER(e) + 8, C.alert, 2.5);
+      ctx.fillStyle = 'rgba(251,113,133,0.18)';
+      ctx.beginPath(); ctx.arc(e.x, e.y, ER(e) + 6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function render(ctx) {
     const s = BW.state, cam = s.camera || { x: 0, y: 0 };
-    const cx = Math.round(cam.x), cy = Math.round(cam.y);              // integer offsets = crisp pixels
+    const cx = Math.round(cam.x), cy = Math.round(cam.y);
     const vis = (e, m) => e.x > cx - m && e.x < cx + cfg.view.width + m && e.y > cy - m && e.y < cy + cfg.view.height + m;
 
     ctx.save();
-    ctx.translate(-cx, -cy);                                           // world → screen
+    ctx.translate(-cx, -cy);
     drawBackground(ctx, { x: cx, y: cy });
+    drawMoveHint(ctx);
     for (const n of s.nodes) if (vis(n, 40)) drawNode(ctx, n);
     for (const o of s.obstacles) if (vis(o, 80)) drawRock(ctx, o);
     for (const b of s.buildings) if (vis(b, 160)) drawBuilding(ctx, b);
     for (const id of s.selected) { const u = BW.byId(id); if (u) ring(ctx, u.x, u.y, ER(u) + 5, C.selection, 2); }
     drawRally(ctx);
-    for (const u of s.units) if (vis(u, 40)) drawAnt(ctx, u, s.time);
+    for (const u of s.units) if (vis(u, 40)) {
+      if (u.acted && s.turn && u.team === s.turn.side) ctx.globalAlpha = 0.45;
+      drawAnt(ctx, u, s.time);
+      ctx.globalAlpha = 1;
+    }
     for (const u of s.units) if (u.hp < u.maxHp && vis(u, 40)) bar(ctx, u.x, u.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
     drawAlerts(ctx); drawPings(ctx); drawGhost(ctx);
     if (s.drag) drawDrag(ctx, s.drag);
     ctx.restore();
 
-    if (s.phase !== 'menu') drawMinimap(ctx);                          // screen-space HUD
+    if (s.phase !== 'menu') drawMinimap(ctx);
     updateHUD(); updateOverlay();
   }
 
