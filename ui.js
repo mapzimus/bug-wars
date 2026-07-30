@@ -1,10 +1,7 @@
 /* ============================================================================
-   Bug Wars — ui.js   (v3 — faction-aware)
+   Bug Wars — ui.js   (v5: turn-based)
    ----------------------------------------------------------------------------
-   The onboarding + HUD-chrome layer: start menu, faction picker, difficulty,
-   the dynamically-built build/train panel for the chosen faction, the attack
-   warning, and a faction-aware tutorial. Only observes state + updates DOM.
-   (Panel buttons are built with safe DOM methods, not innerHTML.)
+   Menu, faction picker, build/train panel, turn banner, tutorial.
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -24,14 +21,14 @@ window.BW = window.BW || {};
     lair: 'Lair', nursery: 'Nursery', spinnery: 'Spinnery',
   };
   const DESC = {
-    worker: 'gathers resources', soldier: 'tanky · beats skirmishers', fireant: 'fast · venom · anti-air & siege', leafcutter: 'siege · wrecks buildings & walls',
-    drone: 'gathers resources', guard: 'tanky frontline', striker: 'fast · venom · anti-air & siege', carpenter: 'siege · wrecks buildings & walls', hornet: 'flyer · raids · ignores walls',
-    grub: 'gathers resources', bruiser: 'slow heavy tank', bombardier: 'acid spit · anti-air & siege', ram: 'siege · cracks walls & buildings',
-    spiderling: 'gathers resources', hunter: 'agile frontline', spitter: 'venom · anti-air & siege', weaver: 'siege · wrecks buildings & walls', balloonist: 'flyer · drifts over walls',
-    barracks: 'makes soldiers / fire ants', workshop: 'makes leafcutters', granary: 'closer drop-off', tower: 'shoots attackers (+ flyers)', wall: 'tough barrier · only siege cracks it',
-    brood: 'makes guards / strikers', apiary: 'makes carpenters + hornets',
-    den: 'makes bruisers / bombardiers', burrow: 'makes rams',
-    nursery: 'makes hunters / spitters', spinnery: 'makes weavers + balloonists',
+    worker: 'gathers each turn', soldier: 'tanky · beats skirmishers', fireant: 'fast · venom · anti-air', leafcutter: 'siege · wrecks buildings',
+    drone: 'gathers each turn', guard: 'tanky frontline', striker: 'fast · venom · anti-air', carpenter: 'siege · wrecks buildings', hornet: 'flyer · ignores walls',
+    grub: 'gathers each turn', bruiser: 'slow heavy tank', bombardier: 'acid · anti-air', ram: 'siege · cracks walls',
+    spiderling: 'gathers each turn', hunter: 'agile frontline', spitter: 'venom · anti-air', weaver: 'siege · wrecks buildings', balloonist: 'flyer · over walls',
+    barracks: 'soldiers / fire ants', workshop: 'leafcutters', granary: 'closer drop-off', tower: 'fires each turn', wall: 'blocks · siege only',
+    brood: 'guards / strikers', apiary: 'carpenters + hornets',
+    den: 'bruisers / bombardiers', burrow: 'rams',
+    nursery: 'hunters / spitters', spinnery: 'weavers + balloonists',
   };
   const ICON = { food: '🍞', mud: '🟫', honeydew: '🍯' };
   const costStr = cost => Object.keys(cost).map(k => ICON[k] + ' ' + cost[k]).join(' ') || '—';
@@ -50,7 +47,6 @@ window.BW = window.BW || {};
     if (small) { const sm = document.createElement('small'); sm.textContent = small; e.append(sm); }
     return e;
   }
-  // Rebuild the build/train buttons for the player's faction (safe DOM, no innerHTML).
   function buildPanel(faction) {
     const F = cfg.FACTIONS[faction]; if (!F) return;
     const br = $('buildRow'), tr = $('trainRow');
@@ -58,16 +54,15 @@ window.BW = window.BW || {};
     if (tr) { tr.replaceChildren(rowLabel('Train')); F.trainMenu.forEach((k, i) => tr.append(makeBtn('trainbtn', 'train', k, costStr(cfg.UNIT_STATS[k].cost), i + 1))); }
   }
 
-  // Faction-aware tutorial (works for ants or bees).
   const pf = () => (BW.state && BW.state.faction) ? BW.state.faction.player : 'ants';
   const STEPS = [
-    { text: "Drag a box over your gatherers, then RIGHT-CLICK a Food pile (green) to mine it. Scroll the map with WASD / arrows / screen edges — or click the minimap.",
-      done: s => s.units.some(u => u.team === 'player' && u.kind === cfg.FACTIONS[pf()].gatherer && (u.order.type === 'gather' || u.order.type === 'returning')) },
-    { text: "You need MUD (brown) to build. With ~120 mud, click your production building below and place it near your base.",
+    { text: 'Tap a gatherer (highlighted when ready). Blue tiles are move range — tap a Food pile to send them to harvest. They collect automatically at the start of each of your turns while adjacent.',
+      done: s => s.units.some(u => u.team === 'player' && u.kind === cfg.FACTIONS[pf()].gatherer && u.gathering != null) },
+    { text: 'Gather Mud, then tap a production building in the panel and place it on an empty tile near your nest.',
       done: s => s.buildings.some(b => b.team === 'player' && b.kind === cfg.FACTIONS[pf()].producers[0]) },
-    { text: "Train fighters from it (number keys). Counters matter — skirmishers shoot down flyers, siege wrecks buildings.",
+    { text: 'Train fighters from the panel. Each unit acts once per turn — tap them, then tap an enemy in the red highlight to attack. Counters matter.',
       done: s => s.units.some(u => u.team === 'player' && u.kind !== cfg.FACTIONS[pf()].gatherer) },
-    { text: "Defend with a Tower + Walls, keep your economy running, and RIGHT-CLICK the enemy base to destroy it. A warning shows when they attack!",
+    { text: 'When you\'re done ordering, tap End Turn. The rival colony moves, then it\'s your turn again. Destroy their nest to win!',
       done: () => false },
   ];
   let stepIdx = 0, lastPhase = 'menu', selectedFaction = 'ants';
@@ -81,6 +76,28 @@ window.BW = window.BW || {};
 
     const sp = $('selPanel');
     if (sp) sp.style.display = (s.phase === 'playing' && !s.watchMode) ? '' : 'none';
+
+    const endBtn = $('endTurnBtn');
+    if (endBtn) {
+      const yours = s.phase === 'playing' && !s.watchMode && s.turn && s.turn.side === 'player' && !s.turn.busy;
+      endBtn.disabled = !yours;
+      endBtn.classList.toggle('ready', yours);
+      endBtn.textContent = !s.turn ? 'End Turn'
+        : s.turn.busy ? '…'
+        : s.turn.side === 'enemy' ? 'Enemy turn'
+        : 'End Turn';
+    }
+
+    const turnEl = $('turnBanner');
+    if (turnEl && s.turn) {
+      if (s.phase !== 'playing') turnEl.classList.remove('show');
+      else {
+        turnEl.classList.add('show');
+        const side = s.turn.side === 'player' ? 'Your turn' : 'Enemy turn';
+        turnEl.textContent = 'Turn ' + s.turn.number + ' · ' + side;
+        turnEl.classList.toggle('enemy', s.turn.side === 'enemy');
+      }
+    }
 
     if (s.phase !== lastPhase) {
       if (BW.sound && s.phase === 'won') BW.sound.play('win');

@@ -1,9 +1,8 @@
 /* ============================================================================
-   Bug Wars — ai.js   (v3 — team-generic AND faction-generic)
+   Bug Wars — ai.js   (v5: turn-based)
    ----------------------------------------------------------------------------
-   A FAIR opponent that can drive ANY team of ANY faction. It reads its faction's
-   role map (gatherer / frontline / skirmisher / siege / flyer + build order) so
-   the same brain plays Ants or Bees. Difficulty only scales parameters.
+   Fair opponent for colony-turn play. On its turn it: assigns idle gatherers,
+   trains / builds, then moves every unit once (gather, attack, or advance).
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -22,21 +21,21 @@ window.BW = window.BW || {};
   const army   = team => { const g = gatherer(team); return BW.state.units.filter(u => u.team === team && u.kind !== g); };
   const canTrain = (team, kind) => kind && sys().producerFor(kind, team);
 
-  function workerResource(u) {
-    if (u.carryType) return u.carryType;
-    const n = BW.byId(u.order.targetId);
-    return (n && n.kind === 'node') ? n.resource : null;
-  }
-
-  function assignIdleWorkers(team) {
+  function assignGatherers(team) {
     const g = gatherer(team);
-    const idles = units(team, g).filter(u => u.order.type === 'idle');
-    if (!idles.length) return;
-    const want = { food: 0.60, mud: 0.28, honeydew: 0.12 };
+    const want = { food: 0.55, mud: 0.30, honeydew: 0.15 };
     const have = { food: 0, mud: 0, honeydew: 0 };
     let assigned = 0;
-    for (const w of units(team, g)) { const r = workerResource(w); if (r) { have[r]++; assigned++; } }
-    for (const u of idles) {
+    for (const w of units(team, g)) {
+      const n = w.gathering != null ? BW.byId(w.gathering) : null;
+      if (n && n.kind === 'node') { have[n.resource]++; assigned++; }
+    }
+    for (const u of units(team, g)) {
+      if (u.acted) continue;
+      if (u.gathering != null) {
+        const n = BW.byId(u.gathering);
+        if (n && n.amount > 0) { sys().actGather(u, n); continue; }
+      }
       const total = Math.max(1, assigned);
       let pick = null, best = -Infinity;
       for (const r of ['food', 'mud', 'honeydew']) {
@@ -44,23 +43,26 @@ window.BW = window.BW || {};
         if (gap > best && sys().nearestNode(u, r)) { best = gap; pick = r; }
       }
       const node = (pick && sys().nearestNode(u, pick)) || sys().nearestNode(u);
-      if (node) { u.order = { type: 'gather', tx: node.x, ty: node.y, targetId: node.id }; have[node.resource]++; assigned++; }
+      if (node) {
+        sys().actGather(u, node);
+        have[node.resource]++; assigned++;
+      } else sys().actWait(u);
     }
   }
 
   function maybeBuild(team) {
     const base = baseOf(team); if (!base) return;
-    const order = FAC(team).aiBuildOrder, essential = order[0];   // first producer is essential
+    const order = FAC(team).aiBuildOrder, essential = order[0];
     for (const kind of order) {
       if (builds(team, kind).length) continue;
       const s = cfg.BUILDING_STATS[kind];
       if (!sys().canAfford(BW.state.res[team], s.cost)) {
-        if (kind === essential) return;   // save up for it
-        else continue;                    // optional — try the next affordable one
+        if (kind === essential) return;
+        else continue;
       }
-      const j = (BW.state.time * 0.7) % (Math.PI * 2);
-      for (let a = 0; a < 22; a++) {
-        const ang = j + (a / 22) * Math.PI * 2, rad = 72 + a * 9;
+      const j = (BW.state.turn.number * 1.7) % (Math.PI * 2);
+      for (let a = 0; a < 28; a++) {
+        const ang = j + (a / 28) * Math.PI * 2, rad = cfg.turns.tile * (1.5 + a * 0.35);
         const x = base.x + Math.cos(ang) * rad, y = base.y + Math.sin(ang) * rad * 0.7;
         if (sys().validPlacement(kind, x, y)) { BW.tryBuild(kind, team, x, y); return; }
       }
@@ -78,64 +80,96 @@ window.BW = window.BW || {};
     if (units(team, g).length < prof().workerTarget) { BW.tryTrain(g, team); return; }
     if (!canTrain(team, A.frontline)) return;
     const mine = classCounts(army(team)), foe = classCounts(army(opp(team)));
-    let want = A.frontline;                                   // default frontline
-    if ((foe.siege >= 2 || foe.flyer >= 2) && canTrain(team, A.skirmisher)) want = A.skirmisher;       // skirmisher > siege & anti-air
-    else if (foe.infantry >= 3 && canTrain(team, A.siege) && foe.infantry >= foe.skirmisher) want = A.siege; // siege > infantry
-    else if (foe.skirmisher >= 3) want = A.frontline;                                                  // infantry > skirmisher
-    else {                                                    // no clear read → healthy mix
+    let want = A.frontline;
+    if ((foe.siege >= 2 || foe.flyer >= 2) && canTrain(team, A.skirmisher)) want = A.skirmisher;
+    else if (foe.infantry >= 3 && canTrain(team, A.siege) && foe.infantry >= foe.skirmisher) want = A.siege;
+    else if (foe.skirmisher >= 3) want = A.frontline;
+    else {
       if (mine.skirmisher < mine.infantry * 0.5 && canTrain(team, A.skirmisher)) want = A.skirmisher;
       else if (canTrain(team, A.siege) && mine.siege < mine.infantry * 0.4) want = A.siege;
-      else if (A.flyer && canTrain(team, A.flyer) && mine.flyer < 2) want = A.flyer;   // bees keep a couple of hornets
+      else if (A.flyer && canTrain(team, A.flyer) && mine.flyer < 2) want = A.flyer;
     }
     if (want) BW.tryTrain(want, team);
   }
 
-  function maybeAttack(team) {
-    const t = BW.state.time, g = prof().grace;
+  function moveArmy(team) {
     const target = baseOf(opp(team));
     if (!target) return;
+    const turn = BW.state.turn.number;
+    const grace = prof().graceTurns;
     const a = army(team);
-    const idle = a.filter(u => u.order.type === 'idle');
-    const d2t = u => Math.hypot(u.x - target.x, u.y - target.y);
+    const canPush = turn >= grace || target.hp < target.maxHp * 0.35 || a.length >= prof().armyThreshold;
 
-    const enemyHome = army(opp(team)).filter(u => d2t(u) < 280).length;
-    const opportunity = target.hp < target.maxHp * 0.30 || (t > g && enemyHome === 0 && a.length >= 3);
-    if (t < g && !opportunity) return;
-
-    const lateGame = t > g + 200;                          // very long game → stop hoarding, commit all
-    const eff = lateGame ? 4 : Math.max(5, prof().armyThreshold - Math.floor((t - g) / 90));
-    if (!opportunity && idle.length < eff) return;
-
-    const garrison = (opportunity || lateGame) ? 0 : Math.max(2, Math.round(eff * 0.3));
-    const send = idle.slice().sort((u, v) => d2t(u) - d2t(v)).slice(0, Math.max(1, idle.length - garrison));
-    for (const u of send) u.order = { type: 'attackMove', tx: target.x, ty: target.y, targetId: null };
-
-    if (BW.state.controllers[opp(team)] === 'human') {
+    // Warn the human once when we commit to a push.
+    if (canPush && BW.state.controllers[opp(team)] === 'human') {
       const warn = BW.state.alerts.some(al => al.type === 'incoming' && al.until > BW.state.time);
       if (!warn) {
-        BW.state.alerts.push({ type: 'incoming', until: BW.state.time + 6, x: target.x, y: target.y });
+        BW.state.alerts.push({ type: 'incoming', until: BW.state.time + 4, x: target.x, y: target.y });
         if (BW.sound) BW.sound.play('alert');
       }
     }
-  }
 
-  function thinkFor(team) {
-    if (!baseOf(team)) return;
-    assignIdleWorkers(team);
-    maybeBuild(team);
-    maybeTrain(team);
-    maybeAttack(team);
-  }
+    for (const u of a) {
+      if (u.acted) continue;
+      // Prefer a kill in range (from current or after a move).
+      const moves = sys().moveRange(u);
+      let bestTarget = null, bestTile = null, bestScore = -Infinity;
+      const consider = (gx, gy) => {
+        for (const t of sys().attackTargetsFrom(u, gx, gy)) {
+          // Prefer units over buildings, prefer wounded, prefer nest when pushing.
+          let score = 10;
+          if (cfg.UNIT_STATS[t.kind]) score += 20;
+          if (cfg.BUILDING_STATS[t.kind] && cfg.BUILDING_STATS[t.kind].category === 'nest') score += canPush ? 40 : 5;
+          score += (1 - t.hp / t.maxHp) * 15;
+          score -= Math.abs(gx - u.gx) + Math.abs(gy - u.gy);
+          if (score > bestScore) { bestScore = score; bestTarget = t; bestTile = { gx, gy }; }
+        }
+      };
+      consider(u.gx, u.gy);
+      for (const k of moves) {
+        const [gx, gy] = k.split(',').map(Number);
+        consider(gx, gy);
+      }
+      if (bestTarget) { sys().actAttack(u, bestTarget); continue; }
 
-  function update(state, dt) {
-    for (const team of ['player', 'enemy']) {
-      if (state.controllers[team] !== 'ai') continue;
-      state.aiThink[team] -= dt;
-      if (state.aiThink[team] > 0) continue;
-      state.aiThink[team] = prof().thinkEvery;
-      thinkFor(team);
+      if (!canPush) {
+        // Hold a defensive ring near home.
+        const home = baseOf(team);
+        if (!home) { sys().actWait(u); continue; }
+        let best = null, bestD = Infinity;
+        for (const k of moves) {
+          const [gx, gy] = k.split(',').map(Number);
+          const d = Math.abs(Math.abs(gx - home.gx) + Math.abs(gy - home.gy) - 3);
+          if (d < bestD) { bestD = d; best = { gx, gy }; }
+        }
+        if (best) sys().actMove(u, best.gx, best.gy);
+        else sys().actWait(u);
+        continue;
+      }
+
+      // Advance toward enemy nest.
+      let best = null, bestD = Infinity;
+      for (const k of moves) {
+        const [gx, gy] = k.split(',').map(Number);
+        const d = Math.abs(gx - target.gx) + Math.abs(gy - target.gy);
+        if (d < bestD) { bestD = d; best = { gx, gy }; }
+      }
+      if (best && (best.gx !== u.gx || best.gy !== u.gy)) sys().actMove(u, best.gx, best.gy);
+      else sys().actWait(u);
     }
   }
 
-  BW.ai = { update };
+  function takeTurn(team) {
+    if (!baseOf(team) || BW.state.phase !== 'playing') return;
+    // Economy first (spend is free / not an "action"), then unit actions.
+    maybeBuild(team);
+    maybeTrain(team);
+    maybeTrain(team);           // second queue slot when rich
+    assignGatherers(team);
+    moveArmy(team);
+    // Anything still idle waits.
+    for (const u of BW.state.units) if (u.team === team && !u.acted) sys().actWait(u);
+  }
+
+  BW.ai = { takeTurn };
 })();

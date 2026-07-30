@@ -1,12 +1,12 @@
 /* ============================================================================
-   Bug Wars — config.js   (v4: big maps, four factions)
+   Bug Wars — config.js   (v5: turn-based, mobile-first)
    ----------------------------------------------------------------------------
    THE TUNING FILE. Every balance knob lives here as plain data the rest of the
    game reads at runtime. Change a number, reload, watch the game change.
 
-   v4 adds: a world larger than the screen (the `view` is a camera into it),
-   minimap + camera tuning, two new factions (Beetles, Spiders), and a wall /
-   pacing rebalance for longer, more strategic games.
+   v5: colony-turn strategy (Advance Wars–style). Economy, attack, and defense
+   still matter — but on YOUR turn, not against a real-time clock. Tuned for
+   touch: tap to select, tap to act, End Turn.
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -23,31 +23,33 @@ BW.config = {
   },
   minimap: { w: 200, margin: 12 },        // bottom-right; height follows world aspect
 
-  gameSpeed: 0.6,            // master tempo (1 = old "normal"). Lower = calmer.
-                            // Live-adjustable in-game with the Speed −/+ controls
-                            // (or [ and ] keys). Scales the whole sim uniformly —
-                            // movement, combat, gather, training AND the AI's
-                            // attack timing all stretch together, balance intact.
+  /* ---- Turn-based rules -------------------------------------------------
+     One side acts at a time. Each unit gets ONE action per turn (move, or
+     move+attack, or harvest). Training / harvest / venom tick on turn start.
+     -------------------------------------------------------------------- */
+  turns: {
+    tile: 64,                         // px per grid cell (world snaps to this)
+    // Move range ≈ speed/45 tiles; attack range ≈ range/tile. Derived at boot.
+    harvest: { food: 28, mud: 22, honeydew: 14 },   // worker adjacent to a node, each turn
+    nodeRegen: { food: 10, mud: 6, honeydew: 4 },   // pile regrows each full round
+    trainDivisor: 4,                  // ceil(buildTime / this) = turns to hatch
+    venomTurns: 2,                    // venom DoT lasts this many of the victim's turns
+    towerShots: 1,                    // defensive buildings fire this many times per own turn
+  },
 
   /* ---- Economy --------------------------------------------------------- */
   // Each side starts with this. Food trains units; Mud builds structures;
   // Honeydew is scarce and buys elite units / (later) upgrades.
   startingResources: { food: 200, mud: 150, honeydew: 0 },
-  popCap: 80,                 // bumped for the bigger map + longer games (room for real armies)
-  startingWorkers: 5,
-
-  gather: {
-    carryCap: 10,           // a worker hauls this much, then walks it home
-    rate: { food: 9, mud: 7, honeydew: 5 },   // gathered per second, per resource
-  },
+  popCap: 60,
+  startingWorkers: 4,
 
   // Resource node types scattered on the map.
   resources: {
-    // Big piles + slow regen (per second) so the economy NEVER permanently
-    // collapses — there's always a trickle to recover on. amount = starting/max.
-    food:     { amount: 600, regen: 2.6, radius: 11, color: '#b6d36b', label: 'Food' },
-    mud:      { amount: 700, regen: 1.6, radius: 12, color: '#a07a4e', label: 'Mud'  },
-    honeydew: { amount: 380, regen: 1.0, radius: 10, color: '#ffd166', label: 'Honeydew' },
+    // Big piles + turn regen so the economy NEVER permanently collapses.
+    food:     { amount: 500, radius: 14, color: '#b6d36b', label: 'Food' },
+    mud:      { amount: 560, radius: 14, color: '#a07a4e', label: 'Mud'  },
+    honeydew: { amount: 320, radius: 14, color: '#ffd166', label: 'Honeydew' },
   },
 
   /* ---- Units: stats + costs + counter class ----------------------------
@@ -253,13 +255,12 @@ BW.config = {
 
   /* ---- Enemy AI difficulty profiles -----------------------------------
      The AI plays by the SAME rules you do — it scales these parameters, it
-     does not cheat. grace = seconds of peace before it can attack.
-     v4: longer graces + bigger waves = longer, more deliberate games.
+     does not cheat. graceTurns = full rounds of peace before it can attack.
      -------------------------------------------------------------------- */
   difficulties: {
-    easy:   { workerTarget: 8,  armyThreshold: 6,  thinkEvery: 1.6, ecoMult: 1.0,  grace: 120 },
-    normal: { workerTarget: 12, armyThreshold: 9,  thinkEvery: 1.1, ecoMult: 1.0,  grace: 90  },
-    hard:   { workerTarget: 16, armyThreshold: 13, thinkEvery: 0.8, ecoMult: 1.12, grace: 60  },
+    easy:   { workerTarget: 6,  armyThreshold: 5,  ecoMult: 1.0,  graceTurns: 8 },
+    normal: { workerTarget: 9,  armyThreshold: 7,  ecoMult: 1.0,  graceTurns: 6 },
+    hard:   { workerTarget: 12, armyThreshold: 9,  ecoMult: 1.1,  graceTurns: 4 },
   },
 
   /* ---- Look & feel ----------------------------------------------------- */
@@ -272,10 +273,22 @@ BW.config = {
   },
 
   /* ---- Misc ------------------------------------------------------------ */
-  separationRadius: 18,
-  rallyOffset: 64,
-  guardRange: 300,           // idle fighters defend enemies within this of their nest
-  emergencyWorkerTime: 16,   // 0 workers? the nest hatches a FREE one this often (anti-softlock)
-  guardRadius: 95,           // idle soldiers hold a defensive ring this far from their nest
-  guardHomeRange: 280,       // ...but only auto-return to guard when within this of the nest
+  rallyOffset: 64,            // default rally in front of a production building (1 tile)
+  emergencyWorkerTurns: 3,    // 0 workers? nest hatches a FREE one after this many of your turns
 };
+
+/* Derive per-unit move / attack tiles + train turns from the legacy stats so
+   balance knobs stay in one place (speed/range/buildTime). */
+(function deriveTurnStats() {
+  const T = BW.config.turns.tile;
+  for (const k of Object.keys(BW.config.UNIT_STATS)) {
+    const s = BW.config.UNIT_STATS[k];
+    s.move = Math.max(3, Math.round(s.speed / 40));
+    s.atkTiles = Math.max(1, Math.round(s.range / T));
+    s.trainTurns = Math.max(1, Math.ceil(s.buildTime / BW.config.turns.trainDivisor));
+  }
+  for (const k of Object.keys(BW.config.BUILDING_STATS)) {
+    const s = BW.config.BUILDING_STATS[k];
+    if (s.range) s.atkTiles = Math.max(1, Math.round(s.range / T));
+  }
+})();
