@@ -1,7 +1,7 @@
 /* ============================================================================
-   Bug Wars — world.js   (v5: turn-based grid)
+   Bug Wars — world.js   (v5.1: maps + fx)
    ----------------------------------------------------------------------------
-   The DATA layer: entity factories, the map layout, grid helpers, and small
+   The DATA layer: entity factories, map layouts (Garden / Skirmish), grid
    helpers. Entities are plain objects with a `kind` field — no class hierarchy.
    ========================================================================== */
 
@@ -41,9 +41,11 @@ window.BW = window.BW || {};
       hp: s.hp, maxHp: s.hp,
       heading: team === 'player' ? -Math.PI / 2 : Math.PI / 2,
       order: { type: 'idle', tx: sn.x, ty: sn.y, targetId: null },
-      acted: false,                 // used its action this turn?
-      venomDps: 0, venomTurns: 0,   // DoT remaining (ticks on victim's turn start)
-      gathering: null,              // node id while assigned to harvest
+      acted: false,
+      venomDps: 0, venomTurns: 0,
+      gathering: null,
+      anim: null,                     // {x0,y0,x1,y1,t,dur} visual lerp
+      flash: 0,
     };
   }
 
@@ -55,10 +57,11 @@ window.BW = window.BW || {};
       id: nextId(), kind, team,
       x: sn.x, y: sn.y, gx: sn.gx, gy: sn.gy,
       hp: s.hp, maxHp: s.hp,
+      flash: 0,                       // hit flash timer (seconds)
     };
     if (s.trains) {
       b.trainQueue = [];
-      b.trainTimer = 0;               // turns remaining on current hatch
+      b.trainTimer = 0;
       const r = snapXY(sn.x, sn.y + forward * cfg.rallyOffset);
       b.rallyX = r.x; b.rallyY = r.y;
     }
@@ -71,13 +74,25 @@ window.BW = window.BW || {};
     return { id: nextId(), kind: 'node', resource, x: sn.x, y: sn.y, gx: sn.gx, gy: sn.gy, amount: max, max };
   }
 
+  function applyMapSize(mapId) {
+    const m = cfg.maps[mapId] || cfg.maps.garden;
+    cfg.world.width = m.width;
+    cfg.world.height = m.height;
+  }
+
   function initWorld(difficulty, opts) {
+    const mapId = (opts && opts.map) || 'garden';
+    applyMapSize(mapId);
+    // decor must rebuild when map size changes
+    if (BW.invalidateDecor) BW.invalidateDecor();
+
     const W = cfg.world.width, H = cfg.world.height;
     const playerAI = !!(opts && opts.playerAI);
     const pFac = (opts && opts.faction) || 'ants';
     const others = Object.keys(cfg.FACTIONS).filter(f => f !== pFac);
     const eFac = (opts && opts.enemyFaction) || others[Math.floor(Math.random() * others.length)];
     const FP = cfg.FACTIONS[pFac], FE = cfg.FACTIONS[eFac];
+    const skirmish = mapId === 'skirmish';
 
     const state = {
       units: [], buildings: [], nodes: [], obstacles: [],
@@ -93,26 +108,32 @@ window.BW = window.BW || {};
       controllers: { player: playerAI ? 'ai' : 'human', enemy: 'ai' },
       faction: { player: pFac, enemy: eFac },
       watchMode: playerAI,
+      mapId,
       drag: null,
       placing: null,
       placeXY: null,
       pings: [], alerts: [],
-      camera: { x: 0, y: 0 },
-      time: 0,                        // visual clock (seconds of wall time while playing)
+      floats: [],                     // floating combat / harvest text
+      camera: { x: 0, y: 0, zoom: skirmish ? 0.85 : 1 },
+      camTarget: null,                // soft follow {x,y} during enemy actions
+      time: 0,
       turn: {
-        side: 'player',               // whose turn
-        number: 1,                    // increments each time it becomes the player's turn again
-        busy: false,                  // AI / resolve in progress — input locked
+        side: 'player',
+        number: 1,
+        busy: false,
       },
-      moveHint: null,                 // { moves:Set, attacks:Set } for selected unit overlay
+      moveHint: null,
+      hoverDmg: null,                 // {targetId, text} damage preview
     };
 
-    const playerNest = createBuilding(FP.base, 'player', 340, H - 300);
-    const enemyNest  = createBuilding(FE.base, 'enemy',  W - 340, 300);
+    const nestOffX = skirmish ? 220 : 340;
+    const nestOffY = skirmish ? 200 : 300;
+    const playerNest = createBuilding(FP.base, 'player', nestOffX, H - nestOffY);
+    const enemyNest  = createBuilding(FE.base, 'enemy',  W - nestOffX, nestOffY);
     state.buildings.push(playerNest, enemyNest);
 
-    state.camera.x = Math.max(0, Math.min(W - cfg.view.width,  playerNest.x - cfg.view.width / 2));
-    state.camera.y = Math.max(0, Math.min(H - cfg.view.height, playerNest.y - cfg.view.height / 2));
+    state.camera.x = Math.max(0, playerNest.x - (cfg.view.width / state.camera.zoom) / 2);
+    state.camera.y = Math.max(0, playerNest.y - (cfg.view.height / state.camera.zoom) / 2);
 
     const ring = (nest, team, gatherer) => {
       for (let i = 0; i < cfg.startingWorkers; i++) {
@@ -125,25 +146,44 @@ window.BW = window.BW || {};
     ring(playerNest, 'player', FP.gatherer);
     ring(enemyNest, 'enemy', FE.gatherer);
 
+    // Resource layout — skirmish uses a tighter mirrored set.
     const mirror = ([r, x, y]) => [r, W - x, H - y];
-    const half = [
-      ['food', 560, H - 300], ['food', 530, H - 440], ['food', 420, H - 530],
-      ['food', W / 2, H - 120],
-      ['mud', 760, H - 440], ['mud', 1050, H - 180],
-      ['mud', W / 2 - 170, H / 2 + 120],
-      ['honeydew', W / 2 - 120, H / 2 + 80],
-      ['honeydew', 300, 330],
-    ];
+    let half;
+    if (skirmish) {
+      half = [
+        ['food', 360, H - 220], ['food', 280, H - 340],
+        ['food', W / 2, H - 100],
+        ['mud', 480, H - 300], ['mud', W / 2 - 100, H / 2 + 80],
+        ['honeydew', W / 2 - 80, H / 2 + 40],
+      ];
+    } else {
+      half = [
+        ['food', 560, H - 300], ['food', 530, H - 440], ['food', 420, H - 530],
+        ['food', W / 2, H - 120],
+        ['mud', 760, H - 440], ['mud', 1050, H - 180],
+        ['mud', W / 2 - 170, H / 2 + 120],
+        ['honeydew', W / 2 - 120, H / 2 + 80],
+        ['honeydew', 300, 330],
+      ];
+    }
     const nodes = [...half, ...half.map(mirror), ['honeydew', W / 2, H / 2]];
     nodes.forEach(([r, x, y]) => state.nodes.push(createNode(r, x, y)));
 
-    // Rocks snap to tiles so pathfinding stays clean.
-    const rocksHalf = [
-      { x: W / 2,       y: H / 2 - 250, r: 48 },
-      { x: W / 2 - 460, y: H / 2,       r: 36 },
-      { x: 560,         y: H / 2 + 200, r: 30 },
-      { x: 1060,        y: H - 240,     r: 26 },
-    ];
+    let rocksHalf;
+    if (skirmish) {
+      rocksHalf = [
+        { x: W / 2,       y: H / 2 - 140, r: 40 },
+        { x: W / 2 - 280, y: H / 2,       r: 28 },
+        { x: 420,         y: H / 2 + 120, r: 24 },
+      ];
+    } else {
+      rocksHalf = [
+        { x: W / 2,       y: H / 2 - 250, r: 48 },
+        { x: W / 2 - 460, y: H / 2,       r: 36 },
+        { x: 560,         y: H / 2 + 200, r: 30 },
+        { x: 1060,        y: H - 240,     r: 26 },
+      ];
+    }
     state.obstacles = [...rocksHalf, ...rocksHalf.map(o => ({ x: W - o.x, y: H - o.y, r: o.r }))].map(o => {
       const sn = snapXY(o.x, o.y);
       return { x: sn.x, y: sn.y, gx: sn.gx, gy: sn.gy, r: o.r };
@@ -179,7 +219,7 @@ window.BW = window.BW || {};
     if (s.selectedBuilding != null && !s.buildings.some(b => b.id === s.selectedBuilding)) s.selectedBuilding = null;
   }
 
-  BW.world = { createUnit, createBuilding, createNode, initWorld, nextId, toTile, tileCenter, snapXY, cols, rows, tile };
+  BW.world = { createUnit, createBuilding, createNode, initWorld, nextId, toTile, tileCenter, snapXY, cols, rows, tile, applyMapSize };
   BW.byId = byId;
   BW.removeDead = removeDead;
 })();

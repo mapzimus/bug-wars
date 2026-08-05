@@ -14,12 +14,20 @@ window.BW = window.BW || {};
 BW.config = {
 
   /* ---- The battlefield ------------------------------------------------- */
-  world: { width: 2560, height: 1440 },   // the MAP (4x the old area)
+  // Default = full Garden. Skirmish is a tighter map for phones / quicker matches.
+  maps: {
+    garden:   { width: 2560, height: 1440 },
+    skirmish: { width: 1472, height: 960 },
+  },
+  world: { width: 2560, height: 1440 },   // active map size (copied from maps.* at init)
   view:  { width: 1280, height: 720 },    // the CANVAS — a camera window into the world
   camera: {
     edgeSize: 24,        // px from the canvas edge that triggers edge-scrolling
     edgeSpeed: 820,      // px/s while edge-scrolling (gentler = more controllable)
     keySpeed: 1100,      // px/s for WASD / arrow keys
+    zoomMin: 0.55,
+    zoomMax: 1.35,
+    zoomStep: 0.08,
   },
   minimap: { w: 200, margin: 12 },        // bottom-right; height follows world aspect
 
@@ -29,12 +37,16 @@ BW.config = {
      -------------------------------------------------------------------- */
   turns: {
     tile: 64,                         // px per grid cell (world snaps to this)
-    // Move range ≈ speed/45 tiles; attack range ≈ range/tile. Derived at boot.
+    // Move range ≈ speed/40 tiles; attack range ≈ range/tile. Derived at boot.
     harvest: { food: 28, mud: 22, honeydew: 14 },   // worker adjacent to a node, each turn
     nodeRegen: { food: 10, mud: 6, honeydew: 4 },   // pile regrows each full round
     trainDivisor: 4,                  // ceil(buildTime / this) = turns to hatch
     venomTurns: 2,                    // venom DoT lasts this many of the victim's turns
     towerShots: 1,                    // defensive buildings fire this many times per own turn
+    moveAnim: 0.22,                   // seconds to lerp a unit to its new tile
+    attackFlash: 0.28,                // hit ring / flash lifetime
+    floatLife: 0.85,                  // floating damage / harvest text lifetime
+    aiStep: 140,                      // ms between AI unit actions (readable on mobile)
   },
 
   /* ---- Economy --------------------------------------------------------- */

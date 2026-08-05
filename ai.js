@@ -1,8 +1,8 @@
 /* ============================================================================
-   Bug Wars — ai.js   (v5: turn-based)
+   Bug Wars — ai.js   (v5.1: stepped actions)
    ----------------------------------------------------------------------------
-   Fair opponent for colony-turn play. On its turn it: assigns idle gatherers,
-   trains / builds, then moves every unit once (gather, attack, or advance).
+   Fair opponent for colony-turn play. takeTurn(team, enqueue) queues each
+   unit action so the play loop can animate them one-by-one.
    ========================================================================== */
 
 window.BW = window.BW || {};
@@ -21,7 +21,16 @@ window.BW = window.BW || {};
   const army   = team => { const g = gatherer(team); return BW.state.units.filter(u => u.team === team && u.kind !== g); };
   const canTrain = (team, kind) => kind && sys().producerFor(kind, team);
 
-  function assignGatherers(team) {
+  function takeTurn(team, enqueue) {
+    const run = typeof enqueue === 'function' ? enqueue : fn => fn();
+    if (!baseOf(team) || BW.state.phase !== 'playing') return;
+
+    // Economy (instant — no unit animation needed).
+    maybeBuild(team);
+    maybeTrain(team);
+    maybeTrain(team);
+
+    // Gatherers
     const g = gatherer(team);
     const want = { food: 0.55, mud: 0.30, honeydew: 0.15 };
     const have = { food: 0, mud: 0, honeydew: 0 };
@@ -31,23 +40,94 @@ window.BW = window.BW || {};
       if (n && n.kind === 'node') { have[n.resource]++; assigned++; }
     }
     for (const u of units(team, g)) {
-      if (u.acted) continue;
-      if (u.gathering != null) {
-        const n = BW.byId(u.gathering);
-        if (n && n.amount > 0) { sys().actGather(u, n); continue; }
-      }
-      const total = Math.max(1, assigned);
-      let pick = null, best = -Infinity;
-      for (const r of ['food', 'mud', 'honeydew']) {
-        const gap = want[r] - have[r] / total;
-        if (gap > best && sys().nearestNode(u, r)) { best = gap; pick = r; }
-      }
-      const node = (pick && sys().nearestNode(u, pick)) || sys().nearestNode(u);
-      if (node) {
-        sys().actGather(u, node);
-        have[node.resource]++; assigned++;
-      } else sys().actWait(u);
+      run(() => {
+        if (!u || u.hp <= 0 || u.acted) return;
+        if (u.gathering != null) {
+          const n = BW.byId(u.gathering);
+          if (n && n.amount > 0) { sys().actGather(u, n); return; }
+        }
+        const total = Math.max(1, assigned);
+        let pick = null, best = -Infinity;
+        for (const r of ['food', 'mud', 'honeydew']) {
+          const gap = want[r] - have[r] / total;
+          if (gap > best && sys().nearestNode(u, r)) { best = gap; pick = r; }
+        }
+        const node = (pick && sys().nearestNode(u, pick)) || sys().nearestNode(u);
+        if (node) {
+          sys().actGather(u, node);
+          have[node.resource]++; assigned++;
+        } else sys().actWait(u);
+      });
     }
+
+    // Army
+    const target = baseOf(opp(team));
+    const turn = BW.state.turn.number;
+    const grace = prof().graceTurns;
+    const a = army(team);
+    const canPush = !!(target && (turn >= grace || target.hp < target.maxHp * 0.35 || a.length >= prof().armyThreshold));
+
+    if (canPush && target && BW.state.controllers[opp(team)] === 'human') {
+      run(() => {
+        const warn = BW.state.alerts.some(al => al.type === 'incoming' && al.until > BW.state.time);
+        if (!warn) {
+          BW.state.alerts.push({ type: 'incoming', until: BW.state.time + 4, x: target.x, y: target.y });
+          if (BW.sound) BW.sound.play('alert');
+        }
+      });
+    }
+
+    for (const u of a) {
+      run(() => {
+        if (!u || u.hp <= 0 || u.acted || !target) { if (u && !u.acted) sys().actWait(u); return; }
+        const moves = sys().moveRange(u);
+        let bestTarget = null, bestScore = -Infinity;
+        const consider = (gx, gy) => {
+          for (const t of sys().attackTargetsFrom(u, gx, gy)) {
+            let score = 10;
+            if (cfg.UNIT_STATS[t.kind]) score += 20;
+            if (cfg.BUILDING_STATS[t.kind] && cfg.BUILDING_STATS[t.kind].category === 'nest') score += canPush ? 40 : 5;
+            score += (1 - t.hp / t.maxHp) * 15;
+            score -= Math.abs(gx - u.gx) + Math.abs(gy - u.gy);
+            if (score > bestScore) { bestScore = score; bestTarget = t; }
+          }
+        };
+        consider(u.gx, u.gy);
+        for (const k of moves) {
+          const [gx, gy] = k.split(',').map(Number);
+          consider(gx, gy);
+        }
+        if (bestTarget) { sys().actAttack(u, bestTarget); return; }
+
+        if (!canPush) {
+          const home = baseOf(team);
+          if (!home) { sys().actWait(u); return; }
+          let best = null, bestD = Infinity;
+          for (const k of moves) {
+            const [gx, gy] = k.split(',').map(Number);
+            const d = Math.abs(Math.abs(gx - home.gx) + Math.abs(gy - home.gy) - 3);
+            if (d < bestD) { bestD = d; best = { gx, gy }; }
+          }
+          if (best) sys().actMove(u, best.gx, best.gy);
+          else sys().actWait(u);
+          return;
+        }
+
+        let best = null, bestD = Infinity;
+        for (const k of moves) {
+          const [gx, gy] = k.split(',').map(Number);
+          const d = Math.abs(gx - target.gx) + Math.abs(gy - target.gy);
+          if (d < bestD) { bestD = d; best = { gx, gy }; }
+        }
+        if (best && (best.gx !== u.gx || best.gy !== u.gy)) sys().actMove(u, best.gx, best.gy);
+        else sys().actWait(u);
+      });
+    }
+
+    // Anything still idle waits (queued last).
+    run(() => {
+      for (const u of BW.state.units) if (u.team === team && !u.acted) sys().actWait(u);
+    });
   }
 
   function maybeBuild(team) {
@@ -90,85 +170,6 @@ window.BW = window.BW || {};
       else if (A.flyer && canTrain(team, A.flyer) && mine.flyer < 2) want = A.flyer;
     }
     if (want) BW.tryTrain(want, team);
-  }
-
-  function moveArmy(team) {
-    const target = baseOf(opp(team));
-    if (!target) return;
-    const turn = BW.state.turn.number;
-    const grace = prof().graceTurns;
-    const a = army(team);
-    const canPush = turn >= grace || target.hp < target.maxHp * 0.35 || a.length >= prof().armyThreshold;
-
-    // Warn the human once when we commit to a push.
-    if (canPush && BW.state.controllers[opp(team)] === 'human') {
-      const warn = BW.state.alerts.some(al => al.type === 'incoming' && al.until > BW.state.time);
-      if (!warn) {
-        BW.state.alerts.push({ type: 'incoming', until: BW.state.time + 4, x: target.x, y: target.y });
-        if (BW.sound) BW.sound.play('alert');
-      }
-    }
-
-    for (const u of a) {
-      if (u.acted) continue;
-      // Prefer a kill in range (from current or after a move).
-      const moves = sys().moveRange(u);
-      let bestTarget = null, bestTile = null, bestScore = -Infinity;
-      const consider = (gx, gy) => {
-        for (const t of sys().attackTargetsFrom(u, gx, gy)) {
-          // Prefer units over buildings, prefer wounded, prefer nest when pushing.
-          let score = 10;
-          if (cfg.UNIT_STATS[t.kind]) score += 20;
-          if (cfg.BUILDING_STATS[t.kind] && cfg.BUILDING_STATS[t.kind].category === 'nest') score += canPush ? 40 : 5;
-          score += (1 - t.hp / t.maxHp) * 15;
-          score -= Math.abs(gx - u.gx) + Math.abs(gy - u.gy);
-          if (score > bestScore) { bestScore = score; bestTarget = t; bestTile = { gx, gy }; }
-        }
-      };
-      consider(u.gx, u.gy);
-      for (const k of moves) {
-        const [gx, gy] = k.split(',').map(Number);
-        consider(gx, gy);
-      }
-      if (bestTarget) { sys().actAttack(u, bestTarget); continue; }
-
-      if (!canPush) {
-        // Hold a defensive ring near home.
-        const home = baseOf(team);
-        if (!home) { sys().actWait(u); continue; }
-        let best = null, bestD = Infinity;
-        for (const k of moves) {
-          const [gx, gy] = k.split(',').map(Number);
-          const d = Math.abs(Math.abs(gx - home.gx) + Math.abs(gy - home.gy) - 3);
-          if (d < bestD) { bestD = d; best = { gx, gy }; }
-        }
-        if (best) sys().actMove(u, best.gx, best.gy);
-        else sys().actWait(u);
-        continue;
-      }
-
-      // Advance toward enemy nest.
-      let best = null, bestD = Infinity;
-      for (const k of moves) {
-        const [gx, gy] = k.split(',').map(Number);
-        const d = Math.abs(gx - target.gx) + Math.abs(gy - target.gy);
-        if (d < bestD) { bestD = d; best = { gx, gy }; }
-      }
-      if (best && (best.gx !== u.gx || best.gy !== u.gy)) sys().actMove(u, best.gx, best.gy);
-      else sys().actWait(u);
-    }
-  }
-
-  function takeTurn(team) {
-    if (!baseOf(team) || BW.state.phase !== 'playing') return;
-    // Economy first (spend is free / not an "action"), then unit actions.
-    maybeBuild(team);
-    maybeTrain(team);
-    maybeTrain(team);           // second queue slot when rich
-    assignGatherers(team);
-    moveArmy(team);
-    // Anything still idle waits.
-    for (const u of BW.state.units) if (u.team === team && !u.acted) sys().actWait(u);
   }
 
   BW.ai = { takeTurn };

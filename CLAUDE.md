@@ -37,6 +37,9 @@ field — no class hierarchy.**
 - Training uses **turns** (`ceil(buildTime / trainDivisor)`), not seconds.
 - Towers fire once at the start of their side's turn. Venom ticks on the victim's turn start.
 - `BW.endTurn()` → rival `beginTurn` → AI `takeTurn` (if AI) → back to player.
+- **Maps:** `garden` (large) or `skirmish` (phone-friendly, default on menu).
+- **Feel:** move lerp, floating damage/harvest text, pinch/wheel zoom, Next-ready cycling,
+  enemy-turn camera follow, stepped AI actions.
 
 ## Conventions / gotchas
 - Keep the split: **data (world) / behavior (systems) / draw (render)**.
