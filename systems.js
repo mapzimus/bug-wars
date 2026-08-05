@@ -121,22 +121,61 @@ window.BW = window.BW || {};
     let mult = (cfg.COUNTERS[aCls] && cfg.COUNTERS[aCls][tCls]) || 1;
     const tb = cfg.BUILDING_STATS[target.kind];
     if (tb && tb.blocks && aCls !== 'siege') mult *= cfg.wallResist;
-    target.hp -= base * mult;
+    const dealt = base * mult;
+    target.hp -= dealt;
+    return dealt;
+  }
+  function previewDamage(attacker, target) {
+    if (!attacker || !target) return 0;
+    const aCls = classOf(attacker), tCls = classOf(target);
+    let mult = (cfg.COUNTERS[aCls] && cfg.COUNTERS[aCls][tCls]) || 1;
+    const tb = cfg.BUILDING_STATS[target.kind];
+    if (tb && tb.blocks && aCls !== 'siege') mult *= cfg.wallResist;
+    return Math.round(damageOf(attacker) * mult);
+  }
+  function pushFloat(x, y, text, color) {
+    BW.state.floats.push({
+      x, y, text, color: color || '#fff',
+      t: BW.state.time, life: cfg.turns.floatLife,
+    });
+  }
+  function lookAt(x, y) {
+    // Soft camera follow during enemy actions (human games only).
+    if (BW.state.controllers.player !== 'human' || BW.state.watchMode) return;
+    BW.state.camTarget = { x, y };
   }
   function strike(attacker, target) {
-    applyDamage(target, damageOf(attacker), attacker);
+    const dealt = applyDamage(target, damageOf(attacker), attacker);
     const s = cfg.UNIT_STATS[attacker.kind];
     if (s && s.venom && target.maxHp && classOf(target) !== 'building') {
-      target.venomDps = s.venom.dps * 3;          // chunkier per-turn tick (was per-second)
+      target.venomDps = s.venom.dps * 3;
       target.venomTurns = cfg.turns.venomTurns;
     }
+    target.flash = cfg.turns.attackFlash;
+    pushFloat(target.x, target.y - 18, '−' + Math.round(dealt), '#fb7185');
+    lookAt(target.x, target.y);
     if (BW.sound && BW.state.controllers[attacker.team] === 'human') BW.sound.play('attack');
   }
 
-  function placeUnit(u, gx, gy) {
+  function placeUnit(u, gx, gy, animate) {
     const c = BW.world.tileCenter(gx, gy);
-    u.gx = gx; u.gy = gy; u.x = c.x; u.y = c.y;
-    u.heading = Math.atan2(c.y - u.y, c.x - u.x) || u.heading;
+    const ox = u.x, oy = u.y;
+    u.gx = gx; u.gy = gy;
+    if (animate !== false && (ox !== c.x || oy !== c.y)) {
+      u.anim = { x0: ox, y0: oy, x1: c.x, y1: c.y, t: 0, dur: cfg.turns.moveAnim };
+      u.x = c.x; u.y = c.y;           // logic position is destination immediately
+    } else {
+      u.x = c.x; u.y = c.y; u.anim = null;
+    }
+    if (c.x !== ox || c.y !== oy) u.heading = Math.atan2(c.y - oy, c.x - ox);
+    lookAt(c.x, c.y);
+  }
+
+  function drawPos(u) {
+    if (!u.anim) return { x: u.x, y: u.y };
+    const a = u.anim, k = Math.min(1, a.t / a.dur);
+    const e = k * (2 - k);             // ease-out
+    return { x: a.x0 + (a.x1 - a.x0) * e, y: a.y0 + (a.y1 - a.y0) * e };
   }
 
   /* ---- economy helpers ------------------------------------------------- */
@@ -165,8 +204,6 @@ window.BW = window.BW || {};
       let node = null;
       if (u.gathering != null) node = BW.byId(u.gathering);
       if (!node || node.kind !== 'node' || node.amount <= 0 || !adjacentToNode(u, node)) {
-        // Auto-pick adjacent node if standing next to one (keeps tedium low, decisions intact:
-        // you still choose WHERE to send the worker).
         node = BW.state.nodes.find(n => n.amount > 0 && adjacentToNode(u, n)) || null;
         u.gathering = node ? node.id : null;
       }
@@ -175,6 +212,10 @@ window.BW = window.BW || {};
       if (BW.state.controllers[team] === 'ai') take = Math.floor(take * cfg.difficulties[BW.state.difficulty].ecoMult);
       node.amount -= take;
       BW.state.res[team][node.resource] += take;
+      if (team === 'player' && take > 0) {
+        const col = cfg.resources[node.resource].color;
+        pushFloat(u.x, u.y - 20, '+' + take, col);
+      }
     }
   }
 
@@ -210,6 +251,7 @@ window.BW = window.BW || {};
     for (const u of BW.state.units) {
       if (u.team !== team || u.venomTurns <= 0) continue;
       u.hp -= u.venomDps;
+      pushFloat(u.x, u.y - 16, '−' + Math.round(u.venomDps), '#7CFF6B');
       u.venomTurns -= 1;
       if (u.venomTurns <= 0) { u.venomTurns = 0; u.venomDps = 0; }
     }
@@ -299,26 +341,22 @@ window.BW = window.BW || {};
     if (!canAct(u)) return { ok: false, reason: 'Not your turn' };
     const moves = moveRange(u);
     if (!moves.has(key(gx, gy))) return { ok: false, reason: "Can't reach there" };
-    const ox = u.x, oy = u.y;
-    placeUnit(u, gx, gy);
-    if (u.x !== ox || u.y !== oy) u.heading = Math.atan2(u.y - oy, u.x - ox);
+    placeUnit(u, gx, gy, true);
     u.acted = true;
     u.order = { type: 'idle', tx: u.x, ty: u.y, targetId: null };
-    // Keep gathering assignment if still adjacent.
     if (u.gathering != null) {
       const n = BW.byId(u.gathering);
       if (!n || !adjacentToNode(u, n)) u.gathering = null;
     }
     BW.state.moveHint = null;
     BW.state.pings.push({ x: u.x, y: u.y, type: 'move', t: BW.state.time });
-    if (BW.sound) BW.sound.play('move');
+    if (BW.sound && BW.state.controllers[u.team] === 'human') BW.sound.play('move');
     return { ok: true };
   }
 
   function actAttack(u, target) {
     if (!canAct(u)) return { ok: false, reason: 'Not your turn' };
     if (!target || target.hp <= 0 || target.team === u.team) return { ok: false, reason: 'Invalid target' };
-    // Find a landable tile in move range from which we can attack, preferring current tile.
     const moves = moveRange(u);
     let best = null;
     if (inAttackRange(u, target) || attackTargetsFrom(u, u.gx, u.gy).some(t => t.id === target.id)) {
@@ -333,7 +371,7 @@ window.BW = window.BW || {};
       }
     }
     if (!best) return { ok: false, reason: 'Out of range' };
-    if (best.gx !== u.gx || best.gy !== u.gy) placeUnit(u, best.gx, best.gy);
+    if (best.gx !== u.gx || best.gy !== u.gy) placeUnit(u, best.gx, best.gy, true);
     u.heading = Math.atan2(target.y - u.y, target.x - u.x);
     strike(u, target);
     u.acted = true;
@@ -373,13 +411,13 @@ window.BW = window.BW || {};
       }
     }
     if (!best) return { ok: false, reason: "Can't reach" };
-    placeUnit(u, best.gx, best.gy);
+    placeUnit(u, best.gx, best.gy, true);
     if (adjacentToNode(u, node)) u.gathering = node.id;
-    else u.gathering = node.id;   // keep assignment — harvest when adjacent next turns
+    else u.gathering = node.id;
     u.acted = true;
     BW.state.moveHint = null;
     BW.state.pings.push({ x: node.x, y: node.y, type: 'gather', t: BW.state.time });
-    if (BW.sound) BW.sound.play('gather');
+    if (BW.sound && BW.state.controllers[u.team] === 'human') BW.sound.play('gather');
     return { ok: true };
   }
 
@@ -447,17 +485,27 @@ window.BW = window.BW || {};
     if (s.phase !== 'playing') { s.turn.busy = false; return; }
     if (s.controllers[team] === 'ai') {
       s.turn.busy = true;
-      setTimeout(() => {
-        if (s.phase !== 'playing') return;
-        if (BW.ai && BW.ai.takeTurn) BW.ai.takeTurn(team);
+      const queue = [];
+      if (BW.ai && BW.ai.takeTurn) BW.ai.takeTurn(team, fn => queue.push(fn));
+      let i = 0;
+      const step = () => {
+        if (s.phase !== 'playing') { s.turn.busy = false; return; }
+        if (i >= queue.length) {
+          BW.removeDead();
+          s.turn.busy = false;
+          endTurn();
+          return;
+        }
+        try { queue[i++](); } catch (e) { console.error(e); i = queue.length; }
         BW.removeDead();
         if (s.phase !== 'playing') { s.turn.busy = false; return; }
-        // AI is done — automatically pass the turn.
-        s.turn.busy = false;
-        endTurn();
-      }, 320);
+        setTimeout(step, cfg.turns.aiStep);
+      };
+      setTimeout(step, 120);
     } else {
       s.turn.busy = false;
+      // Auto-focus first ready unit for the human.
+      if (BW.selectNextReady) BW.selectNextReady();
     }
   }
 
@@ -467,9 +515,11 @@ window.BW = window.BW || {};
 
     s.turn.busy = true;
     s.moveHint = null;
+    s.hoverDmg = null;
     s.selected.clear();
     s.selectedBuilding = null;
     s.placing = null;
+    s.camTarget = null;
 
     const next = s.turn.side === 'player' ? 'enemy' : 'player';
     if (next === 'player') s.turn.number += 1;
@@ -479,16 +529,32 @@ window.BW = window.BW || {};
     playSide(next);
   }
 
-  // Visual-only clock; sim advances on turns, not frames.
+  // Visual-only clock + anim / float tick.
   function update(dt) {
     const s = BW.state;
     if (s.phase !== 'playing') return;
     s.time += dt;
     if (s.pings.length)  s.pings  = s.pings.filter(p => s.time - p.t < 0.5);
     if (s.alerts.length) s.alerts = s.alerts.filter(a => a.until > s.time);
+    if (s.floats.length) s.floats = s.floats.filter(f => s.time - f.t < f.life);
+    for (const u of s.units) {
+      if (u.anim) {
+        u.anim.t += dt;
+        if (u.anim.t >= u.anim.dur) u.anim = null;
+      }
+      if (u.flash > 0) u.flash -= dt;
+    }
+    for (const b of s.buildings) if (b.flash > 0) b.flash -= dt;
+    // Soft camera chase toward camTarget.
+    if (s.camTarget && BW.centerCamera) {
+      const z = s.camera.zoom || 1;
+      const tx = s.camTarget.x - (cfg.view.width / z) / 2;
+      const ty = s.camTarget.y - (cfg.view.height / z) / 2;
+      s.camera.x += (tx - s.camera.x) * Math.min(1, dt * 4);
+      s.camera.y += (ty - s.camera.y) * Math.min(1, dt * 4);
+    }
   }
 
-  // Kick off the first turn after world init.
   function startMatch() {
     beginTurn('player');
     playSide('player');
@@ -503,6 +569,6 @@ window.BW = window.BW || {};
     entityRadius, classOf, dist, canAfford, nearestNode, nearestOwn, producerFor,
     validPlacement, countUnits, queued, moveRange, refreshMoveHint, actMove, actAttack,
     actGather, actWait, inAttackRange, attackTargetsFrom, tileDist, canAct, allActed,
-    beginTurn, playSide, key,
+    beginTurn, playSide, key, previewDamage, drawPos, pushFloat,
   };
 })();

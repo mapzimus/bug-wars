@@ -36,6 +36,8 @@ window.BW = window.BW || {};
      The world is 4x the screen now; re-stroking a thousand grass blades per
      frame would hurt. Paint the terrain once, then blit the visible slice. */
   let decorCanvas = null;
+  function invalidateDecor() { decorCanvas = null; }
+  BW.invalidateDecor = invalidateDecor;
   function buildDecor() {
     const W = cfg.world.width, H = cfg.world.height;
     decorCanvas = document.createElement('canvas');
@@ -65,11 +67,12 @@ window.BW = window.BW || {};
       g.fillStyle = '#e9c46a'; g.beginPath(); g.ellipse(x, y, r * 0.55, r * 0.55, 0, 0, Math.PI * 2); g.fill();
     }
   }
-  function drawBackground(ctx, cam) {
+  function drawBackground(ctx, cam, vw, vh) {
     if (!decorCanvas) buildDecor();
-    const v = cfg.view;
-    // blit only the visible slice of the pre-rendered world
-    ctx.drawImage(decorCanvas, cam.x, cam.y, v.width, v.height, cam.x, cam.y, v.width, v.height);
+    const w = vw || cfg.view.width, h = vh || cfg.view.height;
+    const sx = Math.max(0, cam.x), sy = Math.max(0, cam.y);
+    const sw = Math.min(w, cfg.world.width - sx), sh = Math.min(h, cfg.world.height - sy);
+    if (sw > 0 && sh > 0) ctx.drawImage(decorCanvas, sx, sy, sw, sh, sx, sy, sw, sh);
   }
 
   /* ---- nodes / rocks --------------------------------------------------- */
@@ -187,6 +190,11 @@ window.BW = window.BW || {};
       }
     }
     if (b.hp < b.maxHp) bar(ctx, b.x, b.y - r * (isBase ? 1 : 0.85) - 12, r * 2, 6, b.hp / b.maxHp);
+    if (b.flash > 0) {
+      ctx.globalAlpha = Math.min(1, b.flash / 0.15) * 0.55;
+      ring(ctx, b.x, b.y, r + 10, C.alert, 3);
+      ctx.globalAlpha = 1;
+    }
   }
 
   /* ---- bugs (per-faction body styles) ----------------------------------
@@ -325,7 +333,7 @@ window.BW = window.BW || {};
 
     const selEl = $('selSummary');
     if (selEl) {
-      if (!s.selected.size) selEl.textContent = 'tap a unit · blue = move · red = attack · End Turn when done';
+      if (!s.selected.size) selEl.textContent = 'tap a unit · blue = move · red = attack · pinch to zoom';
       else {
         const names = { worker: 'Worker', soldier: 'Soldier', fireant: 'Fire Ant', leafcutter: 'Leafcutter',
                         drone: 'Drone', guard: 'Guard Bee', striker: 'Striker', carpenter: 'Carpenter', hornet: 'Hornet',
@@ -422,10 +430,40 @@ window.BW = window.BW || {};
       if (a.type !== 'incoming' || a.x == null) continue;
       if (Math.sin(s.time * 10) > 0) { ctx.fillStyle = C.alert; ctx.fillRect(m.x + a.x * sx - 3, m.y + a.y * sy - 3, 6, 6); }
     }
-    // camera viewport rectangle
+    // camera viewport rectangle (respects zoom)
+    const z = (s.camera && s.camera.zoom) || 1;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1;
-    ctx.strokeRect(m.x + s.camera.x * sx, m.y + s.camera.y * sy, cfg.view.width * sx, cfg.view.height * sy);
+    ctx.strokeRect(m.x + s.camera.x * sx, m.y + s.camera.y * sy, (cfg.view.width / z) * sx, (cfg.view.height / z) * sy);
     ctx.restore();
+  }
+
+  function drawFloats(ctx) {
+    const s = BW.state;
+    if (!s.floats) return;
+    for (const f of s.floats) {
+      const age = (s.time - f.t) / f.life;
+      if (age < 0 || age > 1) continue;
+      const y = f.y - age * 28;
+      ctx.globalAlpha = 1 - age;
+      ctx.font = '700 14px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(f.text, f.x + 1, y + 1);
+      ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, y);
+      ctx.globalAlpha = 1;
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawHoverDmg(ctx) {
+    const h = BW.state.hoverDmg; if (!h) return;
+    ctx.font = '700 13px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const y = h.y - 28;
+    ctx.fillStyle = 'rgba(10,14,23,0.75)';
+    const w = ctx.measureText(h.text).width + 14;
+    roundRect(ctx, h.x - w / 2, y - 10, w, 20, 6, true);
+    ctx.fillStyle = C.alert; ctx.fillText(h.text, h.x, y);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   }
 
   function drawMoveHint(ctx) {
@@ -451,26 +489,45 @@ window.BW = window.BW || {};
   }
 
   function render(ctx) {
-    const s = BW.state, cam = s.camera || { x: 0, y: 0 };
-    const cx = Math.round(cam.x), cy = Math.round(cam.y);
-    const vis = (e, m) => e.x > cx - m && e.x < cx + cfg.view.width + m && e.y > cy - m && e.y < cy + cfg.view.height + m;
+    const s = BW.state, cam = s.camera || { x: 0, y: 0, zoom: 1 };
+    const z = cam.zoom || 1;
+    const cx = cam.x, cy = cam.y;
+    const vw = cfg.view.width / z, vh = cfg.view.height / z;
+    const vis = (e, m) => e.x > cx - m && e.x < cx + vw + m && e.y > cy - m && e.y < cy + vh + m;
+    const posOf = u => (BW.systems.drawPos ? BW.systems.drawPos(u) : { x: u.x, y: u.y });
 
     ctx.save();
+    ctx.scale(z, z);
     ctx.translate(-cx, -cy);
-    drawBackground(ctx, { x: cx, y: cy });
+    drawBackground(ctx, { x: cx, y: cy }, vw, vh);
     drawMoveHint(ctx);
     for (const n of s.nodes) if (vis(n, 40)) drawNode(ctx, n);
     for (const o of s.obstacles) if (vis(o, 80)) drawRock(ctx, o);
     for (const b of s.buildings) if (vis(b, 160)) drawBuilding(ctx, b);
-    for (const id of s.selected) { const u = BW.byId(id); if (u) ring(ctx, u.x, u.y, ER(u) + 5, C.selection, 2); }
+    for (const id of s.selected) {
+      const u = BW.byId(id); if (!u) continue;
+      const p = posOf(u);
+      ring(ctx, p.x, p.y, ER(u) + 5, C.selection, 2);
+    }
     drawRally(ctx);
     for (const u of s.units) if (vis(u, 40)) {
+      const p = posOf(u);
+      const ox = u.x, oy = u.y;
+      u.x = p.x; u.y = p.y;
       if (u.acted && s.turn && u.team === s.turn.side) ctx.globalAlpha = 0.45;
       drawAnt(ctx, u, s.time);
+      if (u.flash > 0) {
+        ctx.globalAlpha = Math.min(1, u.flash / 0.15) * 0.5;
+        ring(ctx, p.x, p.y, ER(u) + 8, C.alert, 2.5);
+      }
       ctx.globalAlpha = 1;
+      u.x = ox; u.y = oy;
     }
-    for (const u of s.units) if (u.hp < u.maxHp && vis(u, 40)) bar(ctx, u.x, u.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
-    drawAlerts(ctx); drawPings(ctx); drawGhost(ctx);
+    for (const u of s.units) if (u.hp < u.maxHp && vis(u, 40)) {
+      const p = posOf(u);
+      bar(ctx, p.x, p.y - ER(u) - 9, 22, 4, u.hp / u.maxHp);
+    }
+    drawAlerts(ctx); drawPings(ctx); drawGhost(ctx); drawFloats(ctx); drawHoverDmg(ctx);
     if (s.drag) drawDrag(ctx, s.drag);
     ctx.restore();
 

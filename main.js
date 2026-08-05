@@ -41,14 +41,16 @@ window.BW = window.BW || {};
     const watch = !!(BW.state && BW.state.watchMode);
     const faction = (BW.state && BW.state.faction) ? BW.state.faction.player : 'ants';
     const enemyFaction = (BW.state && BW.state.faction) ? BW.state.faction.enemy : undefined;
-    BW.world.initWorld(d, { playerAI: watch, faction, enemyFaction });
+    const map = (BW.state && BW.state.mapId) || 'skirmish';
+    BW.world.initWorld(d, { playerAI: watch, faction, enemyFaction, map });
     BW.state.phase = 'playing';
     if (BW.ui) { BW.ui.buildPanel(faction); BW.ui.resetTutorial(); }
     if (BW.startMatch) BW.startMatch();
   };
   BW.toMenu = function () {
     const d = (BW.state && BW.state.difficulty) || 'normal';
-    BW.world.initWorld(d); BW.state.phase = 'menu';
+    const map = (BW.state && BW.state.mapId) || 'skirmish';
+    BW.world.initWorld(d, { map }); BW.state.phase = 'menu';
   };
 
   function fitCanvas() {
@@ -62,7 +64,7 @@ window.BW = window.BW || {};
     ctx = canvas.getContext('2d');
     BW.canvas = canvas;
     fitCanvas();
-    BW.world.initWorld('normal');
+    BW.world.initWorld('normal', { map: 'skirmish' });
     BW.state.phase = 'menu';
     BW.input.attach(canvas);
     if (!running) { running = true; requestAnimationFrame(frame); }

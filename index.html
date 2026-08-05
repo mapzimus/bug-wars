@@ -43,12 +43,12 @@
     <div id="selPanel" class="sel-panel">
       <div class="sel-row">
         <span class="sel-label">Select</span>
-        <button class="selbtn" data-select="ready" title="Units that still have an action (F)">Ready</button>
+        <button class="selbtn" data-select="next" title="Next ready unit (F / Tab)">Next</button>
+        <button class="selbtn" data-select="ready" title="Units that still have an action">Ready</button>
         <button class="selbtn" data-select="workers" title="All gatherers (Q)">Workers</button>
         <button class="selbtn" data-select="army" title="All fighters (E)">Army</button>
-        <button class="selbtn" data-select="all" title="Select all units">All</button>
       </div>
-      <div id="selSummary" class="sel-summary">tap a unit · blue = move · red = attack · End Turn when done</div>
+      <div id="selSummary" class="sel-summary">tap a unit · pinch to zoom · End Turn when done</div>
     </div>
 
     <!-- Tutorial coaching card -->
@@ -64,10 +64,16 @@
         <h1 class="menu-title">BUG WARS</h1>
         <p class="menu-sub">A backyard turn-based strategy game. Out-economy, out-build, and out-fight a rival colony — one turn at a time.</p>
         <div class="how">
-          <div><b>Your turn</b> — tap a bug, then tap a blue tile to move or a red-marked enemy to attack. Each unit acts once.</div>
+          <div><b>Your turn</b> — tap a bug, then tap a blue tile to move or a red-marked enemy to attack (damage preview shows on hover). Each unit acts once — <b>Next</b> jumps to the next ready unit.</div>
           <div><b>Gather</b> — send gatherers next to <span class="c-food">Food</span> / <span class="c-mud">Mud</span> / <span class="c-honey">Honeydew</span>. They harvest at the start of every turn while adjacent.</div>
           <div><b>Build &amp; Train</b> — spend Mud on buildings, Food to train. Infantry &gt; skirmisher &gt; siege &gt; buildings; skirmishers shoot down flyers. Walls fall to siege.</div>
-          <div><b>End Turn</b> — when you're done, tap End Turn. The rival plays, then it's your go again. Destroy their nest to win. Drag to pan the map.</div>
+          <div><b>End Turn</b> — tap End Turn when done. Drag to pan, pinch or scroll to zoom. Destroy their nest to win.</div>
+        </div>
+        <div class="maprow">
+          <span class="fac-label">Map</span>
+          <button class="ctrl mapbtn selected" data-map="skirmish">📱 Skirmish</button>
+          <button class="ctrl mapbtn" data-map="garden">🌿 Garden</button>
+          <span class="fac-vs">— Skirmish is tighter &amp; better on phones</span>
         </div>
         <div class="facrow">
           <span class="fac-label">Play as</span>

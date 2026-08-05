@@ -65,7 +65,7 @@ window.BW = window.BW || {};
     { text: 'When you\'re done ordering, tap End Turn. The rival colony moves, then it\'s your turn again. Destroy their nest to win!',
       done: () => false },
   ];
-  let stepIdx = 0, lastPhase = 'menu', selectedFaction = 'ants';
+  let stepIdx = 0, lastPhase = 'menu', selectedFaction = 'ants', selectedMap = 'skirmish';
 
   function tick() {
     const s = BW.state;
@@ -125,8 +125,12 @@ window.BW = window.BW || {};
       selectedFaction = b.dataset.faction;
       document.querySelectorAll('.facbtn').forEach(x => x.classList.toggle('selected', x === b));
     }));
-    document.querySelectorAll('.diffbtn').forEach(b => b.addEventListener('click', () => BW.startGame(b.dataset.diff, { faction: selectedFaction })));
-    document.querySelectorAll('.watchbtn').forEach(b => b.addEventListener('click', () => BW.startGame(b.dataset.diff, { playerAI: true, faction: selectedFaction })));
+    document.querySelectorAll('.mapbtn').forEach(b => b.addEventListener('click', () => {
+      selectedMap = b.dataset.map;
+      document.querySelectorAll('.mapbtn').forEach(x => x.classList.toggle('selected', x === b));
+    }));
+    document.querySelectorAll('.diffbtn').forEach(b => b.addEventListener('click', () => BW.startGame(b.dataset.diff, { faction: selectedFaction, map: selectedMap })));
+    document.querySelectorAll('.watchbtn').forEach(b => b.addEventListener('click', () => BW.startGame(b.dataset.diff, { playerAI: true, faction: selectedFaction, map: selectedMap })));
     document.querySelectorAll('[data-action="menu"]').forEach(b => b.addEventListener('click', () => BW.toMenu()));
     const close = $('tutorialClose'); if (close) close.addEventListener('click', () => { const tc = $('tutorial'); if (tc) tc.style.display = 'none'; });
   }
