@@ -30,7 +30,7 @@ window.BW = window.BW || {};
     ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 1, topY - 1, w + 2, h + 2);
     ctx.fillStyle = frac > 0.4 ? C.hpGood : C.hpBad; ctx.fillRect(x, topY, w * Math.max(0, frac), h);
   }
-  const tintOf = team => team === 'player' ? C.playerTint : C.enemyTint;
+  const tintOf = team => team === 'player' ? C.playerTint : team === 'enemy' ? C.enemyTint : (C.outpost || '#c8e6c9');
 
   /* ---- background (rendered ONCE to an offscreen canvas) ---------------
      The world is 4x the screen now; re-stroking a thousand grass blades per
@@ -160,13 +160,34 @@ window.BW = window.BW || {};
       ctx.beginPath();
       for (let i = 0; i < 4; i++) { const a = i / 4 * Math.PI * 2 + Math.PI / 4; ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + Math.cos(a) * r * 0.62, b.y + Math.sin(a) * r * 0.62); }
       ctx.stroke();
+    } else if (b.kind === 'outpost') {           // contested flag mound
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y - r * 0.55); ctx.lineTo(b.x, b.y + r * 0.45); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y - r * 0.55); ctx.lineTo(b.x + r * 0.55, b.y - r * 0.3); ctx.lineTo(b.x, b.y - r * 0.1);
+      ctx.closePath(); ctx.fill();
     }
   }
   function drawBuilding(ctx, b) {
     const bs = cfg.BUILDING_STATS[b.kind], r = bs.radius, tint = tintOf(b.team);
     const isBase = bs.category === 'nest';
     if (isBase) drawNestMound(ctx, b, tint, r);
-    else {
+    else if (b.kind === 'outpost') {
+      // Soft pulse so mid-map sites read as objectives.
+      const pulse = 0.55 + 0.45 * Math.sin((BW.state.time || 0) * 2.2 + b.id);
+      ctx.fillStyle = bs.color;
+      ctx.beginPath(); ctx.arc(b.x, b.y, r * 0.95, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = tint; ctx.lineWidth = 3; ctx.globalAlpha = 0.55 + 0.35 * pulse;
+      ctx.beginPath(); ctx.arc(b.x, b.y, r + 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      drawGlyph(ctx, b, r);
+      if (!b.team) {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '600 10px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('OUTPOST', b.x, b.y + r + 14);
+      }
+    } else {
       ctx.fillStyle = bs.color; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, true);
       ctx.strokeStyle = tint; ctx.lineWidth = 2.5; roundRect(ctx, b.x - r, b.y - r * 0.85, r * 2, r * 1.7, 6, false);
       drawGlyph(ctx, b, r);
@@ -327,7 +348,7 @@ window.BW = window.BW || {};
     if ($('foodCount'))     $('foodCount').textContent = Math.floor(res.food);
     if ($('mudCount'))      $('mudCount').textContent = Math.floor(res.mud);
     if ($('honeydewCount')) $('honeydewCount').textContent = Math.floor(res.honeydew);
-    if ($('popCount'))      $('popCount').textContent = pop + '/' + cfg.popCap;
+    if ($('popCount'))      $('popCount').textContent = pop + '/' + (BW.systems.effectivePopCap ? BW.systems.effectivePopCap('player') : cfg.popCap);
     if ($('selCount'))      $('selCount').textContent = ready;
     if ($('clock')) $('clock').textContent = (s.turn && s.turn.number) || 1;
 
@@ -359,6 +380,15 @@ window.BW = window.BW || {};
         && s.turn && s.turn.side === 'player' && !s.turn.busy;
       btn.classList.toggle('cant', !ok);
       btn.classList.toggle('active', !!(s.placing && s.placing.kind === k));
+    });
+    document.querySelectorAll('.upgradebtn').forEach(btn => {
+      const k = btn.dataset.upgrade, up = cfg.UPGRADES[k];
+      const done = !!(s.upgrades && s.upgrades.player && s.upgrades.player[k]);
+      const ok = !done && up && BW.systems.canAfford(res, up.cost)
+        && s.turn && s.turn.side === 'player' && !s.turn.busy;
+      btn.classList.toggle('cant', !ok && !done);
+      btn.classList.toggle('done', done);
+      btn.disabled = done;
     });
   }
   function updateOverlay() {

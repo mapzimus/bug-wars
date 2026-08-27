@@ -48,7 +48,7 @@
         <button class="selbtn" data-select="workers" title="All gatherers (Q)">Workers</button>
         <button class="selbtn" data-select="army" title="All fighters (E)">Army</button>
       </div>
-      <div id="selSummary" class="sel-summary">tap a unit · pinch to zoom · End Turn when done</div>
+      <div id="selSummary" class="sel-summary">tap a unit · Army multi-select moves as a group · End Turn when done</div>
     </div>
 
     <!-- Tutorial coaching card -->
@@ -62,12 +62,12 @@
     <div id="menu" class="overlay menu">
       <div class="overlay-card menu-card">
         <h1 class="menu-title">BUG WARS</h1>
-        <p class="menu-sub">A backyard turn-based strategy game. Out-economy, out-build, and out-fight a rival colony — one turn at a time.</p>
+        <p class="menu-sub">Out-economy, out-position, and out-fight a rival colony. Gather scarce Honeydew for tech, capture outposts, and juggle attack with defense — one turn at a time.</p>
         <div class="how">
-          <div><b>Your turn</b> — tap a bug, then tap a blue tile to move or a red-marked enemy to attack (damage preview shows on hover). Each unit acts once — <b>Next</b> jumps to the next ready unit.</div>
-          <div><b>Gather</b> — send gatherers next to <span class="c-food">Food</span> / <span class="c-mud">Mud</span> / <span class="c-honey">Honeydew</span>. They harvest at the start of every turn while adjacent.</div>
-          <div><b>Build &amp; Train</b> — spend Mud on buildings, Food to train. Infantry &gt; skirmisher &gt; siege &gt; buildings; skirmishers shoot down flyers. Walls fall to siege.</div>
-          <div><b>End Turn</b> — tap End Turn when done. Drag to pan, pinch or scroll to zoom. Destroy their nest to win.</div>
+          <div><b>Your turn</b> — tap a bug (or multi-select Army), then tap a blue tile / red enemy. Skirmishers shoot range 2; siege is slow but wrecks buildings; flyers ignore walls. Counters show on hover.</div>
+          <div><b>Economy</b> — park gatherers on <span class="c-food">Food</span> / <span class="c-mud">Mud</span> / <span class="c-honey">Honeydew</span>. Granaries boost nearby harvest. Honeydew does not regen — contest the mid piles. Capture green Outposts for income.</div>
+          <div><b>Tech &amp; Defense</b> — spend Honeydew on colony upgrades. Walls + towers matter. Infantry &gt; skirmisher &gt; siege &gt; buildings; skirmishers are anti-air.</div>
+          <div><b>End Turn</b> — tap End Turn when done. Destroy their nest to win.</div>
         </div>
         <div class="maprow">
           <span class="fac-label">Map</span>
@@ -81,8 +81,8 @@
           <button class="ctrl facbtn" data-faction="bees">🐝 Bees</button>
           <button class="ctrl facbtn" data-faction="beetles">🐞 Beetles</button>
           <button class="ctrl facbtn" data-faction="spiders">🕷️ Spiders</button>
-          <span class="fac-vs">— you'll face a random rival</span>
         </div>
+        <p id="facBlurb" class="fac-blurb">Balanced eco. Strong forage &amp; tunnels.</p>
         <div class="diffrow">
           <button class="ctrl big diffbtn" data-diff="easy">Easy</button>
           <button class="ctrl big diffbtn" data-diff="normal">Normal</button>
@@ -114,6 +114,7 @@
     <div class="rows">
       <div class="panel-row" id="buildRow"></div>
       <div class="panel-row" id="trainRow"></div>
+      <div class="panel-row" id="upgradeRow"></div>
     </div>
   </footer>
 

@@ -129,8 +129,9 @@ window.BW = window.BW || {};
     BW.state.selected = new Set(BW.state.units.filter(u => u.team === 'player' && pred(u)).map(u => u.id));
     BW.state.selectedBuilding = null;
     BW.state.hoverDmg = null;
-    const first = BW.state.selected.size === 1 ? BW.byId([...BW.state.selected][0]) : null;
-    if (first) sys().refreshMoveHint(first);
+    const ids = [...BW.state.selected];
+    if (ids.length === 1) sys().refreshMoveHint(BW.byId(ids[0]));
+    else if (ids.length > 1) sys().refreshGroupHint(ids);
     else BW.state.moveHint = null;
     if (BW.sound) BW.sound.play('select');
   }
@@ -185,14 +186,31 @@ window.BW = window.BW || {};
   function updateHoverDmg(p) {
     const s = BW.state;
     s.hoverDmg = null;
-    if (!playerTurn() || s.selected.size !== 1 || !s.moveHint) return;
-    const u = BW.byId([...s.selected][0]);
-    if (!u || u.acted) return;
+    if (!playerTurn() || !s.selected.size || !s.moveHint) return;
     const enemy = enemyAt(p);
-    if (enemy && s.moveHint.attacks.has(enemy.id)) {
-      const dmg = sys().previewDamage(u, enemy);
-      s.hoverDmg = { targetId: enemy.id, text: dmg + ' dmg', x: enemy.x, y: enemy.y };
+    const outpost = pick(BW.state.buildings.filter(b => b.kind === 'outpost' && b.team !== 'player'), p, 12);
+    const target = enemy || outpost;
+    if (!target || !s.moveHint.attacks.has(target.id)) return;
+    const u = s.selected.size === 1 ? BW.byId([...s.selected][0]) : null;
+    if (u && !u.acted) {
+      const dmg = sys().previewDamage(u, target);
+      const tag = sys().counterLabel(u, target);
+      s.hoverDmg = { targetId: target.id, text: dmg + ' dmg' + (tag ? ' ' + tag : ''), x: target.x, y: target.y };
+      return;
     }
+    let n = 0;
+    for (const id of s.selected) {
+      const unit = BW.byId(id);
+      if (!unit || unit.acted) continue;
+      const atks = new Set();
+      for (const t of sys().attackTargetsFrom(unit, unit.gx, unit.gy)) atks.add(t.id);
+      for (const k of sys().moveRange(unit)) {
+        const [gx, gy] = k.split(',').map(Number);
+        for (const t of sys().attackTargetsFrom(unit, gx, gy)) atks.add(t.id);
+      }
+      if (atks.has(target.id)) n++;
+    }
+    if (n) s.hoverDmg = { targetId: target.id, text: n + ' can hit', x: target.x, y: target.y };
   }
 
   function onPointerDown(e) {
@@ -264,6 +282,34 @@ window.BW = window.BW || {};
     updateHoverDmg(worldPos(e));
   }
 
+  function issueGroupOrder(p) {
+    const s = BW.state;
+    const ids = [...s.selected].map(id => BW.byId(id)).filter(u => u && u.team === 'player' && !u.acted);
+    if (!ids.length) return false;
+    const enemy = enemyAt(p);
+    const outpost = pick(BW.state.buildings.filter(b => b.kind === 'outpost' && b.team !== 'player'), p, 12);
+    const target = enemy || outpost;
+    const node = nodeAt(p);
+    const tile = BW.world.toTile(p.x, p.y);
+
+    if (target) {
+      for (const u of ids) {
+        const r = sys().actAttack(u, target);
+        if (!r.ok) sys().actMoveToward(u, target.gx, target.gy);
+      }
+      afterAct();
+      return true;
+    }
+    if (node && ids.every(u => u.kind === gathererKind('player'))) {
+      for (const u of ids) sys().actGather(u, node);
+      afterAct();
+      return true;
+    }
+    for (const u of ids) sys().actMoveToward(u, tile.gx, tile.gy);
+    afterAct();
+    return true;
+  }
+
   function issueOrder(p) {
     const s = BW.state;
     if (!playerTurn()) return;
@@ -276,14 +322,34 @@ window.BW = window.BW || {};
       return;
     }
 
+    if (s.selectedBuilding != null && s.selected.size === 0) {
+      const b = BW.byId(s.selectedBuilding);
+      if (b && b.trainQueue) {
+        const clicked = playerUnitAt(p);
+        if (clicked) { selectUnit(clicked); return; }
+        sys().setRally(b, p.x, p.y);
+        toast('Rally set');
+        BW.state.pings.push({ x: b.rallyX, y: b.rallyY, type: 'move', t: BW.state.time });
+        return;
+      }
+    }
+
+    if (s.selected.size > 1) {
+      if (issueGroupOrder(p)) return;
+    }
+
     if (s.selected.size === 1) {
       const u = BW.byId([...s.selected][0]);
       if (u && !u.acted) {
         const enemy = enemyAt(p);
+        const outpost = pick(BW.state.buildings.filter(b => b.kind === 'outpost' && b.team !== 'player'), p, 12);
         const node = nodeAt(p);
         const tile = BW.world.toTile(p.x, p.y);
-        if (enemy && (s.moveHint && s.moveHint.attacks.has(enemy.id))) {
-          const r = sys().actAttack(u, enemy);
+        const atkTarget = (enemy && s.moveHint && s.moveHint.attacks.has(enemy.id)) ? enemy
+          : (outpost && s.moveHint && s.moveHint.attacks.has(outpost.id)) ? outpost
+          : null;
+        if (atkTarget) {
+          const r = sys().actAttack(u, atkTarget);
           if (!r.ok) toast(r.reason);
           else afterAct();
           return;
@@ -356,6 +422,12 @@ window.BW = window.BW || {};
     if (BW.state.phase !== 'playing' || !playerTurn()) return;
     BW.state.placing = (BW.state.placing && BW.state.placing.kind === kind) ? null : { kind };
   }
+  function upgrade(key) {
+    if (BW.state.phase === 'playing' && playerTurn()) {
+      const r = BW.tryUpgrade(key, 'player');
+      if (!r.ok) toast(r.reason);
+    }
+  }
 
   const PAN_KEYS = ['w', 'a', 's', 'd', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
   function onKeyDown(e) {
@@ -402,6 +474,7 @@ window.BW = window.BW || {};
     if (panel) panel.addEventListener('click', e => {
       const tb = e.target.closest('.trainbtn'); if (tb) return train(tb.dataset.train);
       const bb = e.target.closest('.buildbtn'); if (bb) return build(bb.dataset.build);
+      const ub = e.target.closest('.upgradebtn'); if (ub) return upgrade(ub.dataset.upgrade);
     });
     document.querySelectorAll('[data-select]').forEach(b => b.addEventListener('click', () => BW.select[b.dataset.select] && BW.select[b.dataset.select]()));
     document.querySelectorAll('[data-action="restart"]').forEach(b => b.addEventListener('click', () => BW.restart()));
