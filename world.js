@@ -102,6 +102,7 @@ window.BW = window.BW || {};
         player: { ...cfg.startingResources },
         enemy:  { ...cfg.startingResources },
       },
+      upgrades: { player: {}, enemy: {} },
       phase: 'playing',
       paused: false,
       difficulty: difficulty || 'normal',
@@ -169,16 +170,29 @@ window.BW = window.BW || {};
     const nodes = [...half, ...half.map(mirror), ['honeydew', W / 2, H / 2]];
     nodes.forEach(([r, x, y]) => state.nodes.push(createNode(r, x, y)));
 
+    // Contested outposts — capture by attacking to 0 HP; grant income + pop.
+    const outposts = skirmish
+      ? [[W / 2 - 220, H / 2 + 40], [W / 2 + 220, H / 2 - 40]]
+      : [[W / 2 - 380, H / 2 + 60], [W / 2 + 380, H / 2 - 60], [W / 2, H / 2 + 220]];
+    for (const [ox, oy] of outposts) {
+      const b = createBuilding('outpost', null, ox, oy);
+      b.team = null; // neutral until captured
+      state.buildings.push(b);
+    }
+
     let rocksHalf;
     if (skirmish) {
+      // Choke rocks near mid so walls matter.
       rocksHalf = [
         { x: W / 2,       y: H / 2 - 140, r: 40 },
-        { x: W / 2 - 280, y: H / 2,       r: 28 },
+        { x: W / 2 - 200, y: H / 2 - 60,  r: 28 },
+        { x: W / 2 - 280, y: H / 2 + 80,  r: 26 },
         { x: 420,         y: H / 2 + 120, r: 24 },
       ];
     } else {
       rocksHalf = [
         { x: W / 2,       y: H / 2 - 250, r: 48 },
+        { x: W / 2 - 300, y: H / 2 - 80,  r: 34 },
         { x: W / 2 - 460, y: H / 2,       r: 36 },
         { x: 560,         y: H / 2 + 200, r: 30 },
         { x: 1060,        y: H - 240,     r: 26 },
@@ -206,12 +220,16 @@ window.BW = window.BW || {};
     s.units = s.units.filter(u => u.hp > 0);
 
     for (const b of s.buildings) {
-      if (b.hp <= 0 && cfg.BUILDING_STATS[b.kind].category === 'nest') {
+      if (b.hp > 0) continue;
+      const st = cfg.BUILDING_STATS[b.kind];
+      // Capturable sites are flipped in strike() when they hit 0 — never remove them.
+      if (st && st.capturable) continue;
+      if (st && st.category === 'nest') {
         if (b.team === 'player') s.phase = 'lost';
         if (b.team === 'enemy')  s.phase = 'won';
       }
     }
-    s.buildings = s.buildings.filter(b => b.hp > 0);
+    s.buildings = s.buildings.filter(b => b.hp > 0 || (cfg.BUILDING_STATS[b.kind] && cfg.BUILDING_STATS[b.kind].capturable));
 
     for (const id of [...s.selected]) {
       if (!s.units.some(u => u.id === id)) s.selected.delete(id);
